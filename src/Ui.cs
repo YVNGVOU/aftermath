@@ -72,6 +72,9 @@ namespace Aftermath
         private Label lblScanProfileTitle, lblScanProfileDesc;
         private TextBox txtScanProfile;
         private Button btnSaveScanProfile;
+        private Label lblAccountCaption, lblAccountStatus;
+        private TextBox txtAccountEmail, txtAccountPassword;
+        private Button btnAccountLogin;
         private Label lblStoragePaths;
         private Panel retentionControls;
         private TextBox txtRetentionDays;
@@ -1240,6 +1243,43 @@ namespace Aftermath
             lblLicenseStatus.Height = 20;
             pgConnections.Controls.Add(lblLicenseStatus);
 
+            // Account login - a convenience layer over the manual paste above.
+            // AccountClient hits the SINVAUX website and, on success, feeds the
+            // returned key through the exact same LicenseStore.SaveVerified path
+            // as a hand-pasted key, so the offline signature check still governs
+            // what actually gets trusted - a reachable-but-malicious server could
+            // return garbage, but it could never forge a signature that verifies.
+            lblAccountCaption = new Label();
+            lblAccountCaption.Text = "Or log in with your SINVAUX account to fetch your license automatically.";
+            lblAccountCaption.Location = new Point(22, 210);
+            lblAccountCaption.AutoSize = false;
+            lblAccountCaption.Height = 20;
+            pgConnections.Controls.Add(lblAccountCaption);
+
+            txtAccountEmail = new TextBox();
+            txtAccountEmail.Location = new Point(22, 234);
+            txtAccountEmail.Width = 220;
+            txtAccountEmail.Height = 24;
+            pgConnections.Controls.Add(txtAccountEmail);
+
+            txtAccountPassword = new TextBox();
+            txtAccountPassword.Location = new Point(250, 234);
+            txtAccountPassword.Width = 160;
+            txtAccountPassword.Height = 24;
+            txtAccountPassword.PasswordChar = '*';
+            pgConnections.Controls.Add(txtAccountPassword);
+
+            btnAccountLogin = Flat("Log in", 90, 26);
+            btnAccountLogin.Location = new Point(22, 266);
+            btnAccountLogin.Click += OnAccountLogin;
+            pgConnections.Controls.Add(btnAccountLogin);
+
+            lblAccountStatus = new Label();
+            lblAccountStatus.Location = new Point(120, 270);
+            lblAccountStatus.AutoSize = false;
+            lblAccountStatus.Height = 20;
+            pgConnections.Controls.Add(lblAccountStatus);
+
             pgConnections.Resize += delegate
             {
                 int w = Math.Max(200, pgConnections.ClientSize.Width - 44);
@@ -1247,7 +1287,95 @@ namespace Aftermath
                 connCard.Width = w;
                 txtLicenseKey.Width = Math.Max(160, w - 200);
                 lblLicenseStatus.Width = Math.Max(80, w - 98);
+                lblAccountCaption.Width = w;
+                lblAccountStatus.Width = Math.Max(80, w - 98);
             };
+        }
+
+        // Shared by both activation paths (manual paste and account login) once
+        // a verified key is already persisted - reloads Entitlements so every
+        // gated check across the app (Sidebar, Sweep host cap, exports) reflects
+        // the new tier immediately, no restart required, and writes the result
+        // into whichever status label the caller is using.
+        private void ApplyActivatedLicense(Label statusLabel)
+        {
+            Entitlements.Reload();
+            LicenseInfo info = LicenseStore.Load();
+            statusLabel.ForeColor = Theme.P.OkColor;
+            statusLabel.Text = "Activated - " + (info != null ? info.Tier.ToString() : "") + " tier.";
+            connCard.Connected = true;
+            connCard.Description = info != null
+                ? "Licensed - " + info.Tier + " tier, expires " + info.ExpiresUtc.ToString("yyyy-MM-dd")
+                : connCard.Description;
+            planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
+            planPill.Invalidate();
+            RefreshScheduledDriftToggle();
+            RefreshScanProfileSection();
+            // Sidebar's Aftermath item set is rebuilt from Entitlements.Current
+            // every time SwitchWorkspace(false) runs (see PopulateAftermathNav),
+            // so the newly unlocked pages appear as soon as the user returns to
+            // the Aftermath workspace - no separate rebuild needed while still
+            // inside Settings, which would otherwise duplicate the current
+            // Settings item set (Sidebar.Add is append-only).
+        }
+
+        // Runs the network call off the UI thread - AccountClient.Login can
+        // block for seconds on a slow connection or timeout, and this page
+        // must stay responsive (and paintable) while it waits.
+        private void OnAccountLogin(object sender, EventArgs e)
+        {
+            string email = txtAccountEmail.Text.Trim();
+            string password = txtAccountPassword.Text;
+            if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
+            {
+                lblAccountStatus.ForeColor = Theme.P.Danger;
+                lblAccountStatus.Text = "Enter your email and password.";
+                return;
+            }
+
+            btnAccountLogin.Enabled = false;
+            lblAccountStatus.ForeColor = Theme.P.TextDim;
+            lblAccountStatus.Text = "Logging in...";
+
+            var t = new Thread(delegate ()
+            {
+                var result = AccountClient.Login(email, password);
+                BeginInvoke(new Action<AccountLoginResult>(OnAccountLoginComplete), result);
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void OnAccountLoginComplete(AccountLoginResult result)
+        {
+            btnAccountLogin.Enabled = true;
+
+            if (!result.Success)
+            {
+                lblAccountStatus.ForeColor = Theme.P.Danger;
+                lblAccountStatus.Text = result.ErrorMessage;
+                return;
+            }
+
+            if (!result.HasLicense)
+            {
+                lblAccountStatus.ForeColor = Theme.P.Warn;
+                lblAccountStatus.Text = "Logged in, but this account has no active license yet.";
+                return;
+            }
+
+            if (!LicenseStore.SaveVerified(result.LicenseKey))
+            {
+                // The website should never sign a key that fails Aftermath's own
+                // check - if this happens the two are out of sync, and saying so
+                // plainly beats pretending the login worked.
+                lblAccountStatus.ForeColor = Theme.P.Danger;
+                lblAccountStatus.Text = "Logged in, but the license the server returned did not verify.";
+                return;
+            }
+
+            txtAccountPassword.Text = "";
+            ApplyActivatedLicense(lblAccountStatus);
         }
 
         // Verifies the pasted key offline via LicenseStore.TryVerify (through
@@ -1259,24 +1387,7 @@ namespace Aftermath
             string key = txtLicenseKey.Text.Trim();
             if (LicenseStore.SaveVerified(key))
             {
-                Entitlements.Reload();
-                LicenseInfo info = LicenseStore.Load();
-                lblLicenseStatus.ForeColor = Theme.P.OkColor;
-                lblLicenseStatus.Text = "Activated - " + (info != null ? info.Tier.ToString() : "") + " tier.";
-                connCard.Connected = true;
-                connCard.Description = info != null
-                    ? "Licensed - " + info.Tier + " tier, expires " + info.ExpiresUtc.ToString("yyyy-MM-dd")
-                    : connCard.Description;
-                planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
-                planPill.Invalidate();
-                RefreshScheduledDriftToggle();
-                RefreshScanProfileSection();
-                // Sidebar's Aftermath item set is rebuilt from Entitlements.Current
-                // every time SwitchWorkspace(false) runs (see PopulateAftermathNav),
-                // so the newly unlocked pages appear as soon as the user returns to
-                // the Aftermath workspace - no separate rebuild needed while still
-                // inside Settings, which would otherwise duplicate the current
-                // Settings item set (Sidebar.Add is append-only).
+                ApplyActivatedLicense(lblLicenseStatus);
             }
             else
             {
@@ -1440,7 +1551,14 @@ namespace Aftermath
             txtLicenseKey.ForeColor = p.Text;
             txtLicenseKey.BorderStyle = BorderStyle.FixedSingle;
             lblLicenseStatus.ForeColor = p.TextDim;
-            foreach (var lbl in new Label[] { lblSettingsIntro, lblConnectionsCaption, lblAboutBody, lblRetentionDaysCaption })
+            foreach (var tb in new TextBox[] { txtAccountEmail, txtAccountPassword })
+            {
+                tb.BackColor = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.08 : 0.05);
+                tb.ForeColor = p.Text;
+                tb.BorderStyle = BorderStyle.FixedSingle;
+            }
+            lblAccountStatus.ForeColor = p.TextDim;
+            foreach (var lbl in new Label[] { lblSettingsIntro, lblConnectionsCaption, lblAccountCaption, lblAboutBody, lblRetentionDaysCaption })
                 lbl.ForeColor = p.TextDim;
             foreach (var lbl in new Label[] { lblStorageCaption, lblAboutName })
                 lbl.ForeColor = p.Text;
