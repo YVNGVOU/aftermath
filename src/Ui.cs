@@ -66,8 +66,8 @@ namespace Aftermath
         // Settings workspace controls - see BuildSettings*() below. Kept as
         // fields only where a handler or a Refresh* method needs to reach them
         // again later, same rule the rest of this class already follows.
-        private Toggle toggleTheme, toggleAutoTrigger;
-        private SettingRow rowAppearance, rowAdmin, rowScanBehavior, rowRetention;
+        private Toggle toggleTheme, toggleAutoTrigger, toggleScheduledDrift;
+        private SettingRow rowAppearance, rowAdmin, rowScanBehavior, rowScheduledDrift, rowRetention;
         private Label lblStoragePaths;
         private Panel retentionControls;
         private TextBox txtRetentionDays;
@@ -196,6 +196,7 @@ namespace Aftermath
             RefreshQuarantine();
             RefreshDriftEmptyText();
             RefreshAutoTriggerToggle();
+            RefreshScheduledDriftToggle();
             nav.Select(Overview);
 
             if (autoScanOnLoad) Load += delegate { OnScan(this, EventArgs.Empty); };
@@ -787,6 +788,35 @@ namespace Aftermath
                 : "Off - turn on to triage automatically after Windows Defender finds or removes something.";
         }
 
+        // Scheduled Drift baselines is Pro+. Same Administrator-gate pattern as
+        // RefreshAutoTriggerToggle, plus an entitlement gate on top - a Free/Plus
+        // user sees why the toggle is off rather than a silently disabled control.
+        private void RefreshScheduledDriftToggle()
+        {
+            if (!Entitlements.Current.HasScheduledDrift)
+            {
+                toggleScheduledDrift.Enabled = false;
+                toggleScheduledDrift.Checked = false;
+                rowScheduledDrift.Description = "Requires Pro or higher - see Upgrade.";
+                return;
+            }
+
+            if (!Elevation.IsAdmin())
+            {
+                toggleScheduledDrift.Enabled = false;
+                toggleScheduledDrift.Checked = false;
+                rowScheduledDrift.Description = "Requires Administrator - see Administrator in Security.";
+                return;
+            }
+
+            toggleScheduledDrift.Enabled = true;
+            bool on = DriftScheduler.IsRegistered();
+            toggleScheduledDrift.Checked = on;
+            rowScheduledDrift.Description = on
+                ? "On - Aftermath captures a fresh Drift baseline daily at 09:00, headlessly."
+                : "Off - turn on to capture a fresh Drift baseline daily, without opening the app.";
+        }
+
         private Button Flat(string text, int w, int h)
         {
             var b = new Button();
@@ -957,7 +987,26 @@ namespace Aftermath
             rowScanBehavior.SetControl(toggleAutoTrigger);
             pgScanBehavior.Controls.Add(rowScanBehavior);
 
-            pgScanBehavior.Resize += delegate { rowScanBehavior.Width = Math.Max(200, pgScanBehavior.ClientSize.Width - 44); };
+            rowScheduledDrift = new SettingRow();
+            rowScheduledDrift.Label = "Scheduled Drift baselines (daily)";
+            rowScheduledDrift.Location = new Point(22, 8 + rowScanBehavior.Height + 10);
+
+            toggleScheduledDrift = new Toggle();
+            toggleScheduledDrift.CheckedChanged += delegate
+            {
+                bool wantOn = toggleScheduledDrift.Checked;
+                bool ok = wantOn ? DriftScheduler.Register() : DriftScheduler.Unregister();
+                if (!ok) MessageBox.Show(this, "Could not update the scheduled task.", "Aftermath");
+                RefreshScheduledDriftToggle();
+            };
+            rowScheduledDrift.SetControl(toggleScheduledDrift);
+            pgScanBehavior.Controls.Add(rowScheduledDrift);
+
+            pgScanBehavior.Resize += delegate
+            {
+                rowScanBehavior.Width = Math.Max(200, pgScanBehavior.ClientSize.Width - 44);
+                rowScheduledDrift.Width = Math.Max(200, pgScanBehavior.ClientSize.Width - 44);
+            };
         }
 
         // DATA > Storage (read-only paths the audit found - not editable, since
@@ -1144,6 +1193,7 @@ namespace Aftermath
                     : connCard.Description;
                 planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
                 planPill.Invalidate();
+                RefreshScheduledDriftToggle();
                 // Sidebar's Aftermath item set is rebuilt from Entitlements.Current
                 // every time SwitchWorkspace(false) runs (see PopulateAftermathNav),
                 // so the newly unlocked pages appear as soon as the user returns to
@@ -1289,7 +1339,7 @@ namespace Aftermath
             // three rows sit directly on a plain page (Bg), the retention row
             // sits inside the DangerZone card (SurfaceElevated), so it is styled
             // to match that card instead.
-            foreach (var row in new SettingRow[] { rowAppearance, rowAdmin, rowScanBehavior })
+            foreach (var row in new SettingRow[] { rowAppearance, rowAdmin, rowScanBehavior, rowScheduledDrift })
             {
                 row.BackColor = p.Bg;
                 row.Restyle();
@@ -1300,6 +1350,7 @@ namespace Aftermath
             toggleTheme.Checked = Theme.IsDark;
             toggleTheme.Invalidate();
             toggleAutoTrigger.Invalidate();
+            toggleScheduledDrift.Invalidate();
             zoneRetention.Restyle();
             connCard.Restyle();
             pgUpgrade.Restyle();
