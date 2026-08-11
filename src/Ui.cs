@@ -231,6 +231,7 @@ namespace Aftermath
 
             planPill = new PlanPill();
             planPill.Location = new Point(388, 21);
+            planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
             header.Controls.Add(planPill);
 
             btnScan = Flat("Run Triage", 140, 34);
@@ -1141,6 +1142,8 @@ namespace Aftermath
                 connCard.Description = info != null
                     ? "Licensed - " + info.Tier + " tier, expires " + info.ExpiresUtc.ToString("yyyy-MM-dd")
                     : connCard.Description;
+                planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
+                planPill.Invalidate();
                 // Sidebar's Aftermath item set is rebuilt from Entitlements.Current
                 // every time SwitchWorkspace(false) runs (see PopulateAftermathNav),
                 // so the newly unlocked pages appear as soon as the user returns to
