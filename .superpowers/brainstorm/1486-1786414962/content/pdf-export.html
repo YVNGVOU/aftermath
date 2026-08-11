@@ -1,0 +1,59 @@
+<style>
+  .pg{background:#EFE7D9;color:#14110F;width:620px;margin:0 auto;padding:40px 44px;font-family:'Segoe UI',system-ui,sans-serif;border-radius:2px;box-shadow:0 8px 30px rgba(0,0,0,.35);}
+  .pg-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #7C2E3A;padding-bottom:12px;margin-bottom:22px;}
+  .pg-word{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#6E675C;}
+  .pg-name{font-size:20px;font-weight:700;margin-top:2px;}
+  .pg-meta{text-align:right;font-size:11px;color:#6E675C;line-height:1.5;}
+  .pg-sec-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#7C2E3A;margin:22px 0 8px;}
+  .pg-summary{display:flex;gap:10px;margin-bottom:6px;}
+  .pg-stat{flex:1;background:#E3D9C6;border-radius:6px;padding:10px 12px;}
+  .pg-stat b{display:block;font-size:18px;}
+  .pg-stat span{font-size:10.5px;color:#6E675C;text-transform:uppercase;letter-spacing:.06em;}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;}
+  th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6E675C;padding:6px 4px;border-bottom:1px solid #C9BFA9;}
+  td{padding:7px 4px;border-bottom:1px solid #DED4C0;}
+  .tag{font-size:9.5px;padding:2px 7px;border-radius:20px;background:#7C2E3A;color:#EFE7D9;}
+  .tag.warn{background:#C9A46A;color:#14110F;}
+  .pg-foot{margin-top:26px;padding-top:12px;border-top:1px solid #C9BFA9;display:flex;justify-content:space-between;font-size:10px;color:#8F8778;}
+</style>
+
+<h2>PDF export mockup — branded incident report</h2>
+<p class="subtitle">Parchemin paper background, Grenat hairline + accents, mirrors the app's dark-mode structure. Click to approve or note changes in terminal.</p>
+
+<div class="options" style="margin-bottom:18px;">
+  <div class="option" data-choice="pdf-a" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content"><h3>This report style</h3><p>Stat row + findings table, SINVAUX header/footer</p></div>
+  </div>
+</div>
+
+<div class="pg">
+  <div class="pg-head">
+    <div>
+      <div class="pg-word">SINVAUX</div>
+      <div class="pg-name">Aftermath — Incident Report</div>
+    </div>
+    <div class="pg-meta">DESKTOP-4J2KQ1<br>Generated 2026-08-10 14:02<br>Scan #47</div>
+  </div>
+
+  <div class="pg-sec-title">Summary</div>
+  <div class="pg-summary">
+    <div class="pg-stat"><b>3</b><span>Detections</span></div>
+    <div class="pg-stat"><b>11</b><span>Artifacts found</span></div>
+    <div class="pg-stat"><b>9</b><span>Quarantined</span></div>
+    <div class="pg-stat"><b>2</b><span>Manual review</span></div>
+  </div>
+
+  <div class="pg-sec-title">Findings</div>
+  <table>
+    <tr><th>Item</th><th>Location</th><th>Verdict</th><th>Action</th></tr>
+    <tr><td>Trojan:Win32/Phonzy.A!ml</td><td>%TEMP%\svc_upd.exe</td><td><span class="tag">Removed</span></td><td>Quarantined</td></tr>
+    <tr><td>Trojan:Win32/Malgent</td><td>HKCU\...\Run\Updatr</td><td><span class="tag">Removed</span></td><td>Quarantined</td></tr>
+    <tr><td>Unrecognized scheduled task</td><td>Task: SysHealthCheck</td><td><span class="tag warn">Review</span></td><td>Flagged</td></tr>
+  </table>
+
+  <div class="pg-foot">
+    <span>SINVAUX Aftermath — no detection engine, reports on Defender's findings</span>
+    <span>Page 1 of 2</span>
+  </div>
+</div>

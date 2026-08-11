@@ -1,0 +1,7 @@
+*.exe
+*.pdb
+*.user
+.vs/
+obj/
+bin/
+aftermath-report.txt

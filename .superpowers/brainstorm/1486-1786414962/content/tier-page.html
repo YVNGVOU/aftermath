@@ -1,0 +1,105 @@
+<style>
+  .sv-wrap{font-family:'Segoe UI',system-ui,sans-serif;background:#14110F;color:#EFE7D9;padding:28px;border-radius:8px;}
+  .sv-header{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;}
+  .sv-wordmark{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#8F8778;}
+  .sv-hair{width:26px;height:2px;background:#7C2E3A;}
+  .sv-title{font-size:22px;font-weight:600;margin:6px 0 22px;}
+  .sv-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
+  .sv-card{background:#1B1815;border:1px solid rgba(239,231,217,0.08);border-radius:10px;padding:16px;display:flex;flex-direction:column;min-height:360px;}
+  .sv-card.rec{border-color:#7C2E3A;box-shadow:0 0 0 1px #7C2E3A inset;}
+  .sv-tier{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8F8778;margin-bottom:6px;}
+  .sv-price{font-size:24px;font-weight:700;margin-bottom:2px;}
+  .sv-price small{font-size:12px;font-weight:400;color:#8F8778;}
+  .sv-badge{display:inline-block;font-size:10px;background:#7C2E3A;color:#EFE7D9;padding:2px 8px;border-radius:20px;margin-bottom:8px;letter-spacing:.06em;text-transform:uppercase;width:fit-content;}
+  .sv-list{list-style:none;margin:14px 0;padding:0;flex:1;}
+  .sv-list li{font-size:12.5px;padding:5px 0;border-top:1px solid rgba(239,231,217,0.06);color:#DCD3C2;}
+  .sv-list li:first-child{border-top:none;}
+  .sv-list li.dim{color:#655F55;}
+  .sv-btn{border:1px solid rgba(239,231,217,0.22);background:transparent;color:#EFE7D9;padding:9px 0;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;text-align:center;}
+  .sv-btn.solid{background:#7C2E3A;border-color:#7C2E3A;}
+  .sv-btn.ghost{color:#8F8778;border-color:rgba(239,231,217,0.12);}
+</style>
+
+<h2>Upgrade / Tier page — layout A</h2>
+<p class="subtitle">5-column comparison, SINVAUX-dark surface, Grenat accents. Click if this base layout works.</p>
+
+<div class="options" style="margin-bottom:18px;">
+  <div class="option" data-choice="layout-a" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content"><h3>This layout</h3><p>5-up cards, Pro highlighted as recommended</p></div>
+  </div>
+</div>
+
+<div class="sv-wrap">
+  <div class="sv-header"><span class="sv-wordmark">SINVAUX</span><div class="sv-hair"></div><span style="font-size:13px;color:#DCD3C2;">Aftermath</span></div>
+  <div class="sv-title">Choose your tier</div>
+
+  <div class="sv-grid">
+    <div class="sv-card">
+      <div class="sv-tier">Free</div>
+      <div class="sv-price">$0</div>
+      <ul class="sv-list">
+        <li>Scan, quarantine &amp; restore</li>
+        <li>Restart to finish cleanup</li>
+        <li>Detections</li>
+        <li>Exposure</li>
+        <li>History</li>
+        <li class="dim">Artifacts, Startup, Persistence</li>
+        <li class="dim">Export</li>
+      </ul>
+      <button class="sv-btn ghost">Current plan</button>
+    </div>
+
+    <div class="sv-card">
+      <div class="sv-tier">Plus</div>
+      <div class="sv-price">$4<small>/mo</small></div>
+      <ul class="sv-list">
+        <li>Everything in Free</li>
+        <li>Artifacts</li>
+        <li>Startup</li>
+        <li>Persistence</li>
+        <li>Network &amp; System</li>
+        <li>Raw export (CSV / JSON)</li>
+        <li class="dim">Branded PDF report</li>
+      </ul>
+      <button class="sv-btn">Get Plus</button>
+    </div>
+
+    <div class="sv-card rec">
+      <div class="sv-badge">Most popular</div>
+      <div class="sv-tier">Pro</div>
+      <div class="sv-price">$9<small>/mo</small></div>
+      <ul class="sv-list">
+        <li>Everything in Plus</li>
+        <li>Scheduled Drift baselines</li>
+        <li>SINVAUX-branded PDF report</li>
+        <li>Unlimited history retention</li>
+      </ul>
+      <button class="sv-btn solid">Get Pro</button>
+    </div>
+
+    <div class="sv-card">
+      <div class="sv-tier">Max</div>
+      <div class="sv-price">$19<small>/mo</small></div>
+      <ul class="sv-list">
+        <li>Everything in Pro</li>
+        <li>Attack-chain correlation timeline</li>
+        <li>Custom scan profiles</li>
+        <li>Multi-host Sweep (up to 5)</li>
+      </ul>
+      <button class="sv-btn">Get Max</button>
+    </div>
+
+    <div class="sv-card">
+      <div class="sv-tier">Enterprise</div>
+      <div class="sv-price">Custom</div>
+      <ul class="sv-list">
+        <li>Everything in Max</li>
+        <li>Fleet — unlimited hosts</li>
+        <li>Org account &amp; RBAC</li>
+        <li>Priority support</li>
+      </ul>
+      <button class="sv-btn ghost">Contact us</button>
+    </div>
+  </div>
+</div>
