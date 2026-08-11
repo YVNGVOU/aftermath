@@ -35,6 +35,7 @@ namespace Aftermath
         // contentHost rather than a second content area.
         private Panel settingsHome, pgAppearance, pgAdmin, pgScanBehavior, pgData, pgConnections, pgAbout;
         private UpgradePage pgUpgrade;
+        private FindingList timelineList;
         private Sidebar nav;
         private ProgressBar bar;
         private Dictionary<string, FindingList> lists = new Dictionary<string, FindingList>();
@@ -86,6 +87,7 @@ namespace Aftermath
         private const string Drift = "Drift";
         private const string Sweep = "Sweep";
         private const string Upgrade = "Upgrade";
+        private const string Timeline = "Timeline";
 
         // Settings workspace page keys. Same convention as the Aftermath keys
         // above: the string IS both the Sidebar item key and, via ShowPage, the
@@ -122,7 +124,8 @@ namespace Aftermath
             { Cleanup,      "🗑" },
             { Quarantine,   "🔒" },
             { Sweep,        "🛰" },
-            { Upgrade,      "⭐" }
+            { Upgrade,      "⭐" },
+            { Timeline,     "⏱" }
         };
 
         private static readonly Dictionary<string, string> Help = new Dictionary<string, string>
@@ -141,6 +144,7 @@ namespace Aftermath
             { Quarantine,    "Items you have quarantined. Restore one back to where it came from, or delete the quarantined copy permanently." },
             { Sweep,         "Push this same triage out to hosts you list below and pull the results back. Aftermath only ever touches a host you have typed into the list yourself - there is no scan-the-network button." },
             { Upgrade,       "Compare tiers and see what each one unlocks." },
+            { Timeline,      "Every finding with a known timestamp, across all categories, in one chronological order - so you can see what happened before what." },
             { SettingsHome,   "Configure how SINVAUX operates on this machine." },
             { SetAppearance,  "Choose between a dark or light colour scheme." },
             { SetAdmin,       "Check whether Aftermath is running with Administrator rights, and relaunch elevated if not." },
@@ -354,6 +358,12 @@ namespace Aftermath
             if (Entitlements.Current.HasArtifactsPages)
                 nav.Add(Cats[3], Cats[3], Glyphs[Cats[3]]);
             nav.Add(Drift, Drift, Glyphs[Drift]);
+            // Max+ only: timestamped findings only exist meaningfully once Plus's
+            // Artifacts/Startup/Persistence/Network/System pages are unlocked too,
+            // and HasCorrelationTimeline already implies HasArtifactsPages since
+            // Max sits above Plus in the tier ladder.
+            if (Entitlements.Current.HasCorrelationTimeline)
+                nav.Add(Timeline, Timeline, Glyphs[Timeline]);
 
             if (Entitlements.Current.HasArtifactsPages)
             {
@@ -492,6 +502,14 @@ namespace Aftermath
             pgUpgrade = new UpgradePage();
             pgUpgrade.Visible = false;
             contentHost.Controls.Add(pgUpgrade);
+
+            // Timeline page - reuses FindingList like Drift does; populated in
+            // Render() from every category's timestamped findings, not just one.
+            timelineList = new FindingList();
+            timelineList.Dock = DockStyle.Fill;
+            timelineList.Visible = false;
+            timelineList.EmptyText = "No timestamped findings yet - run a triage first.";
+            contentHost.Controls.Add(timelineList);
 
             BuildSettingsHome();
             contentHost.Controls.Add(settingsHome);
@@ -1250,6 +1268,7 @@ namespace Aftermath
             sweepPage.Visible = (key == Sweep);
             pgUpgrade.Visible = (key == Upgrade);
             if (key == Upgrade) pgUpgrade.RefreshTier();
+            timelineList.Visible = (key == Timeline);
             foreach (var kv in lists) kv.Value.Visible = (kv.Key == key);
 
             // Settings pages - same pattern, just a second set of keys. Keys never
@@ -1368,6 +1387,7 @@ namespace Aftermath
             txtRetentionDays.BorderStyle = BorderStyle.FixedSingle;
 
             foreach (var fl in lists.Values) fl.BackColor = p.Bg;
+            timelineList.BackColor = p.Bg;
             cleanupList.BackColor = p.Bg;
             quarantineList.BackColor = p.Bg;
 
@@ -1505,6 +1525,19 @@ namespace Aftermath
                 int bad = ordered.Count(x => x.Severity == Sev.Bad);
                 int warn = ordered.Count(x => x.Severity == Sev.Warn);
                 nav.SetCount(c, bad + warn, bad > 0);
+            }
+
+            // Timeline (Max+): every finding that carries a real timestamp - not
+            // every category has one (Startup/Persistence entries usually don't),
+            // so this only ever shows what genuinely happened at a known time
+            // rather than inventing an order for undated findings.
+            if (Entitlements.Current.HasCorrelationTimeline)
+            {
+                var timeline = r.Findings
+                                .Where(x => x.When != DateTime.MinValue)
+                                .OrderByDescending(x => x.When)
+                                .ToList();
+                timelineList.SetItems(timeline);
             }
 
             var removable = r.Findings.Where(f =>
