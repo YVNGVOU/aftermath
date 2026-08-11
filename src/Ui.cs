@@ -34,6 +34,7 @@ namespace Aftermath
         // Aftermath pages above, just a second set of Panels in the same
         // contentHost rather than a second content area.
         private Panel settingsHome, pgAppearance, pgAdmin, pgScanBehavior, pgData, pgConnections, pgAbout;
+        private UpgradePage pgUpgrade;
         private Sidebar nav;
         private ProgressBar bar;
         private Dictionary<string, FindingList> lists = new Dictionary<string, FindingList>();
@@ -73,6 +74,9 @@ namespace Aftermath
         private Button btnSaveRetention;
         private DangerZone zoneRetention;
         private ConnectionCard connCard;
+        private TextBox txtLicenseKey;
+        private Button btnActivateLicense;
+        private Label lblLicenseStatus;
         private Label lblSettingsIntro, lblStorageCaption, lblConnectionsCaption, lblAboutName,
             lblAboutBody, lblRetentionDaysCaption;
 
@@ -81,6 +85,7 @@ namespace Aftermath
         private const string Quarantine = "Quarantine";
         private const string Drift = "Drift";
         private const string Sweep = "Sweep";
+        private const string Upgrade = "Upgrade";
 
         // Settings workspace page keys. Same convention as the Aftermath keys
         // above: the string IS both the Sidebar item key and, via ShowPage, the
@@ -116,7 +121,8 @@ namespace Aftermath
             { Drift,        "⇵" },
             { Cleanup,      "🗑" },
             { Quarantine,   "🔒" },
-            { Sweep,        "🛰" }
+            { Sweep,        "🛰" },
+            { Upgrade,      "⭐" }
         };
 
         private static readonly Dictionary<string, string> Help = new Dictionary<string, string>
@@ -134,6 +140,7 @@ namespace Aftermath
             { Cleanup,       "Tick what you want gone, then quarantine it. Quarantined items are moved aside, not destroyed - you can restore them from the Quarantine page. Protected system locations are refused no matter what." },
             { Quarantine,    "Items you have quarantined. Restore one back to where it came from, or delete the quarantined copy permanently." },
             { Sweep,         "Push this same triage out to hosts you list below and pull the results back. Aftermath only ever touches a host you have typed into the list yourself - there is no scan-the-network button." },
+            { Upgrade,       "Compare tiers and see what each one unlocks." },
             { SettingsHome,   "Configure how SINVAUX operates on this machine." },
             { SetAppearance,  "Choose between a dark or light colour scheme." },
             { SetAdmin,       "Check whether Aftermath is running with Administrator rights, and relaunch elevated if not." },
@@ -338,16 +345,29 @@ namespace Aftermath
             // the same array rather than a second list of page keys to keep in
             // sync with it.
             nav.AddSection("Investigation");
-            for (int i = 0; i < 4; i++) nav.Add(Cats[i], Cats[i], Glyphs[Cats[i]]);
+            // Cats[0..2] (Detections/Exposure/History) are Free-tier; Cats[3]
+            // (Artifacts) is Plus+ per Entitlements.HasArtifactsPages - gated
+            // fully absent below Plus, never a fake disabled preview.
+            for (int i = 0; i < 3; i++) nav.Add(Cats[i], Cats[i], Glyphs[Cats[i]]);
+            if (Entitlements.Current.HasArtifactsPages)
+                nav.Add(Cats[3], Cats[3], Glyphs[Cats[3]]);
             nav.Add(Drift, Drift, Glyphs[Drift]);
 
-            nav.AddSection("System");
-            for (int i = 4; i < Cats.Length; i++) nav.Add(Cats[i], Cats[i], Glyphs[Cats[i]]);
+            if (Entitlements.Current.HasArtifactsPages)
+            {
+                nav.AddSection("System");
+                for (int i = 4; i < Cats.Length; i++) nav.Add(Cats[i], Cats[i], Glyphs[Cats[i]]);
+            }
 
             nav.AddSection("Response");
             nav.Add(Cleanup, Cleanup, Glyphs[Cleanup]);
             nav.Add(Quarantine, Quarantine, Glyphs[Quarantine]);
             nav.Add(Sweep, Sweep, Glyphs[Sweep]);
+
+            // Upgrade is visible to every tier, including Enterprise, so users
+            // can always see the ladder.
+            nav.AddSection("Account");
+            nav.Add(Upgrade, Upgrade, Glyphs[Upgrade]);
         }
 
         // Builds the Settings item set - real capabilities only, per the audit:
@@ -466,6 +486,10 @@ namespace Aftermath
 
             BuildOverview();
             contentHost.Controls.Add(overview);
+
+            pgUpgrade = new UpgradePage();
+            pgUpgrade.Visible = false;
+            contentHost.Controls.Add(pgUpgrade);
 
             BuildSettingsHome();
             contentHost.Controls.Add(settingsHome);
@@ -1046,9 +1070,10 @@ namespace Aftermath
             RefreshQuarantine();
         }
 
-        // CONNECTIONS - the one honest section: SINVAUX has no external
-        // connections or integrations today, so this shows the real empty state
-        // rather than a fabricated "Connected" card for anything.
+        // CONNECTIONS - now the License section: paste a license key, Activate
+        // verifies + persists it via LicenseStore, then Entitlements.Reload()
+        // picks it up live (no restart). Failure shows the real reason, never a
+        // fabricated success state.
         private void BuildSettingsConnections()
         {
             pgConnections = new Panel();
@@ -1057,25 +1082,77 @@ namespace Aftermath
             pgConnections.Padding = new Padding(22, 10, 22, 10);
 
             lblConnectionsCaption = new Label();
-            lblConnectionsCaption.Text = "SINVAUX has no external connections or integrations today.";
+            lblConnectionsCaption.Text = "Paste a license key to unlock a higher tier.";
             lblConnectionsCaption.Location = new Point(22, 8);
             lblConnectionsCaption.AutoSize = false;
             lblConnectionsCaption.Height = 20;
             pgConnections.Controls.Add(lblConnectionsCaption);
 
             connCard = new ConnectionCard();
-            connCard.ServiceName = "No connections";
-            connCard.Connected = false;
-            connCard.Description = "No connections configured yet. SINVAUX runs entirely on this machine.";
+            LicenseInfo current = LicenseStore.Load();
+            connCard.ServiceName = "License";
+            connCard.Connected = (current != null);
+            connCard.Description = current != null
+                ? "Licensed - " + current.Tier + " tier, expires " + current.ExpiresUtc.ToString("yyyy-MM-dd")
+                : "No license activated yet. SINVAUX runs at the Free tier until one is added.";
             connCard.Location = new Point(22, 40);
             pgConnections.Controls.Add(connCard);
+
+            txtLicenseKey = new TextBox();
+            txtLicenseKey.Location = new Point(22, 132);
+            txtLicenseKey.Height = 24;
+            pgConnections.Controls.Add(txtLicenseKey);
+
+            btnActivateLicense = Flat("Activate", 90, 26);
+            btnActivateLicense.Location = new Point(22, 164);
+            btnActivateLicense.Click += OnActivateLicense;
+            pgConnections.Controls.Add(btnActivateLicense);
+
+            lblLicenseStatus = new Label();
+            lblLicenseStatus.Location = new Point(120, 168);
+            lblLicenseStatus.AutoSize = false;
+            lblLicenseStatus.Height = 20;
+            pgConnections.Controls.Add(lblLicenseStatus);
 
             pgConnections.Resize += delegate
             {
                 int w = Math.Max(200, pgConnections.ClientSize.Width - 44);
                 lblConnectionsCaption.Width = w;
                 connCard.Width = w;
+                txtLicenseKey.Width = Math.Max(160, w - 200);
+                lblLicenseStatus.Width = Math.Max(80, w - 98);
             };
+        }
+
+        // Verifies the pasted key offline via LicenseStore.TryVerify (through
+        // SaveVerified), persists it only if valid, then reloads Entitlements so
+        // every gated check across the app (Sidebar, Sweep host cap, exports)
+        // reflects the new tier immediately - no restart required.
+        private void OnActivateLicense(object sender, EventArgs e)
+        {
+            string key = txtLicenseKey.Text.Trim();
+            if (LicenseStore.SaveVerified(key))
+            {
+                Entitlements.Reload();
+                LicenseInfo info = LicenseStore.Load();
+                lblLicenseStatus.ForeColor = Theme.P.OkColor;
+                lblLicenseStatus.Text = "Activated - " + (info != null ? info.Tier.ToString() : "") + " tier.";
+                connCard.Connected = true;
+                connCard.Description = info != null
+                    ? "Licensed - " + info.Tier + " tier, expires " + info.ExpiresUtc.ToString("yyyy-MM-dd")
+                    : connCard.Description;
+                // Sidebar's Aftermath item set is rebuilt from Entitlements.Current
+                // every time SwitchWorkspace(false) runs (see PopulateAftermathNav),
+                // so the newly unlocked pages appear as soon as the user returns to
+                // the Aftermath workspace - no separate rebuild needed while still
+                // inside Settings, which would otherwise duplicate the current
+                // Settings item set (Sidebar.Add is append-only).
+            }
+            else
+            {
+                lblLicenseStatus.ForeColor = Theme.P.Danger;
+                lblLicenseStatus.Text = "Invalid or expired license key.";
+            }
         }
 
         // ABOUT - product name and a short static description only. No version
@@ -1118,6 +1195,8 @@ namespace Aftermath
             driftList.Visible = (key == Drift);
             quarantineList.Visible = (key == Quarantine);
             sweepPage.Visible = (key == Sweep);
+            pgUpgrade.Visible = (key == Upgrade);
+            if (key == Upgrade) pgUpgrade.RefreshTier();
             foreach (var kv in lists) kv.Value.Visible = (kv.Key == key);
 
             // Settings pages - same pattern, just a second set of keys. Keys never
@@ -1190,7 +1269,7 @@ namespace Aftermath
             Color soft = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.16 : 0.10);
             Color softBorder = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.34 : 0.24);
             Color softHover = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.24 : 0.17);
-            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnMenu, btnPro, btnSweep, btnSaveRetention })
+            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnMenu, btnPro, btnSweep, btnSaveRetention, btnActivateLicense })
             {
                 b.BackColor = soft;
                 b.ForeColor = p.Text;
@@ -1220,6 +1299,11 @@ namespace Aftermath
             toggleAutoTrigger.Invalidate();
             zoneRetention.Restyle();
             connCard.Restyle();
+            pgUpgrade.Restyle();
+            txtLicenseKey.BackColor = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.08 : 0.05);
+            txtLicenseKey.ForeColor = p.Text;
+            txtLicenseKey.BorderStyle = BorderStyle.FixedSingle;
+            lblLicenseStatus.ForeColor = p.TextDim;
             foreach (var lbl in new Label[] { lblSettingsIntro, lblConnectionsCaption, lblAboutBody, lblRetentionDaysCaption })
                 lbl.ForeColor = p.TextDim;
             foreach (var lbl in new Label[] { lblStorageCaption, lblAboutName })
