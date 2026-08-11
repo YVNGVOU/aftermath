@@ -509,6 +509,14 @@ namespace Aftermath
             catch { }
             try { roots.Add(Path.GetTempPath()); } catch { }
 
+            // Custom scan profiles (Max+): user-added folders on top of the fixed
+            // roots above. Silently skipped below Max rather than erroring - a
+            // downgraded license just stops extending the scan.
+            if (Entitlements.Current.HasCustomScanProfiles)
+            {
+                foreach (var p in ScanProfileStore.Load()) roots.Add(p);
+            }
+
             DateTime? focus = null;
             if (r.RecentDetectionTimes.Count > 0) focus = r.RecentDetectionTimes.Max();
 

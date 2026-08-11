@@ -69,6 +69,9 @@ namespace Aftermath
         // again later, same rule the rest of this class already follows.
         private Toggle toggleTheme, toggleAutoTrigger, toggleScheduledDrift;
         private SettingRow rowAppearance, rowAdmin, rowScanBehavior, rowScheduledDrift, rowRetention;
+        private Label lblScanProfileTitle, lblScanProfileDesc;
+        private TextBox txtScanProfile;
+        private Button btnSaveScanProfile;
         private Label lblStoragePaths;
         private Panel retentionControls;
         private TextBox txtRetentionDays;
@@ -201,6 +204,7 @@ namespace Aftermath
             RefreshDriftEmptyText();
             RefreshAutoTriggerToggle();
             RefreshScheduledDriftToggle();
+            RefreshScanProfileSection();
             nav.Select(Overview);
 
             if (autoScanOnLoad) Load += delegate { OnScan(this, EventArgs.Empty); };
@@ -835,6 +839,22 @@ namespace Aftermath
                 : "Off - turn on to capture a fresh Drift baseline daily, without opening the app.";
         }
 
+        // Custom scan profiles is Max+. No Administrator gate here (unlike the
+        // two toggles above) - adding extra folders to the Artifacts walk needs
+        // no elevated rights, only the entitlement check.
+        private void RefreshScanProfileSection()
+        {
+            bool has = Entitlements.Current.HasCustomScanProfiles;
+            txtScanProfile.Enabled = has;
+            btnSaveScanProfile.Enabled = has;
+            lblScanProfileDesc.Text = has
+                ? "One folder per line. Folded into every Artifacts scan alongside the built-in locations."
+                : "Requires Max or higher - see Upgrade.";
+
+            if (has)
+                txtScanProfile.Lines = ScanProfileStore.Load().ToArray();
+        }
+
         private Button Flat(string text, int w, int h)
         {
             var b = new Button();
@@ -1020,10 +1040,48 @@ namespace Aftermath
             rowScheduledDrift.SetControl(toggleScheduledDrift);
             pgScanBehavior.Controls.Add(rowScheduledDrift);
 
+            int profileTop = 8 + rowScanBehavior.Height + 10 + rowScheduledDrift.Height + 18;
+
+            lblScanProfileTitle = new Label();
+            lblScanProfileTitle.Text = "Custom scan profile (Max+)";
+            lblScanProfileTitle.Font = Brand.F(10f, FontStyle.Bold);
+            lblScanProfileTitle.AutoSize = true;
+            lblScanProfileTitle.Location = new Point(22, profileTop);
+            pgScanBehavior.Controls.Add(lblScanProfileTitle);
+
+            lblScanProfileDesc = new Label();
+            lblScanProfileDesc.AutoSize = false;
+            lblScanProfileDesc.Height = 18;
+            lblScanProfileDesc.Location = new Point(22, profileTop + 20);
+            pgScanBehavior.Controls.Add(lblScanProfileDesc);
+
+            txtScanProfile = new TextBox();
+            txtScanProfile.Multiline = true;
+            txtScanProfile.ScrollBars = ScrollBars.Vertical;
+            txtScanProfile.Location = new Point(22, profileTop + 42);
+            txtScanProfile.Size = new Size(420, 96);
+            pgScanBehavior.Controls.Add(txtScanProfile);
+
+            btnSaveScanProfile = Flat("Save", 90, 26);
+            btnSaveScanProfile.Location = new Point(22, profileTop + 144);
+            btnSaveScanProfile.Click += delegate
+            {
+                var paths = new List<string>();
+                foreach (var line in txtScanProfile.Lines)
+                {
+                    var p = line.Trim();
+                    if (p.Length > 0) paths.Add(p);
+                }
+                if (!ScanProfileStore.Save(paths))
+                    MessageBox.Show(this, "Could not save the scan profile.", "Aftermath");
+            };
+            pgScanBehavior.Controls.Add(btnSaveScanProfile);
+
             pgScanBehavior.Resize += delegate
             {
                 rowScanBehavior.Width = Math.Max(200, pgScanBehavior.ClientSize.Width - 44);
                 rowScheduledDrift.Width = Math.Max(200, pgScanBehavior.ClientSize.Width - 44);
+                lblScanProfileDesc.Width = Math.Max(200, pgScanBehavior.ClientSize.Width - 44);
             };
         }
 
@@ -1212,6 +1270,7 @@ namespace Aftermath
                 planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
                 planPill.Invalidate();
                 RefreshScheduledDriftToggle();
+                RefreshScanProfileSection();
                 // Sidebar's Aftermath item set is rebuilt from Entitlements.Current
                 // every time SwitchWorkspace(false) runs (see PopulateAftermathNav),
                 // so the newly unlocked pages appear as soon as the user returns to
@@ -1370,6 +1429,10 @@ namespace Aftermath
             toggleTheme.Invalidate();
             toggleAutoTrigger.Invalidate();
             toggleScheduledDrift.Invalidate();
+            lblScanProfileTitle.ForeColor = p.Text;
+            lblScanProfileDesc.ForeColor = p.TextDim;
+            txtScanProfile.BackColor = p.SurfaceElevated;
+            txtScanProfile.ForeColor = p.Text;
             zoneRetention.Restyle();
             connCard.Restyle();
             pgUpgrade.Restyle();
@@ -1798,6 +1861,18 @@ namespace Aftermath
             if (hosts.Count == 0)
             {
                 MessageBox.Show(this, "Enter at least one hostname or IP address, one per line.", "Aftermath");
+                return;
+            }
+            // Free/Plus/Pro cap at 1 host (effectively single-machine use), Max
+            // allows up to 5, Enterprise (Fleet) is unlimited. Blocks the whole
+            // run rather than truncating the list - a silent partial sweep would
+            // be worse than a clear refusal with an upgrade path.
+            int cap = Entitlements.Current.MaxSweepHosts;
+            if (hosts.Count > cap)
+            {
+                MessageBox.Show(this,
+                    "Your plan allows sweeping up to " + cap + " host(s) at a time - you listed " + hosts.Count +
+                    ". See Upgrade for higher host limits.", "Aftermath");
                 return;
             }
             if (string.IsNullOrEmpty(txtSweepUser.Text))
