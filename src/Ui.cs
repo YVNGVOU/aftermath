@@ -17,7 +17,7 @@ namespace Aftermath
 {
     public class MainForm : Form
     {
-        private Button btnScan, btnElevate, btnMenu, btnQuarantine, btnExport, btnPro, btnWorkspace;
+        private Button btnScan, btnElevate, btnMenu, btnQuarantine, btnExport, btnExportRaw, btnPro, btnWorkspace;
         private LinkLabel lnkPermDelete;
         private Label lblStatus, lblPageTitle, lblPageHelp;
         private BrandMark brandMark;
@@ -717,6 +717,12 @@ namespace Aftermath
             btnExport.Enabled = false;
             btnExport.Click += OnExport;
             overview.Controls.Add(btnExport);
+
+            btnExportRaw = Flat("Export CSV/JSON", 150, 34);
+            btnExportRaw.Location = new Point(180, 276);
+            btnExportRaw.Enabled = false;
+            btnExportRaw.Click += OnExportRaw;
+            overview.Controls.Add(btnExportRaw);
 
             btnQuarantine = Flat("Quarantine Checked", 160, 34);
             btnQuarantine.Location = new Point(186, 276);
@@ -1511,7 +1517,7 @@ namespace Aftermath
             Color soft = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.16 : 0.10);
             Color softBorder = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.34 : 0.24);
             Color softHover = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.24 : 0.17);
-            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnMenu, btnPro, btnSweep, btnSaveRetention, btnActivateLicense })
+            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnExportRaw, btnMenu, btnPro, btnSweep, btnSaveRetention, btnActivateLicense })
             {
                 b.BackColor = soft;
                 b.ForeColor = p.Text;
@@ -1640,6 +1646,7 @@ namespace Aftermath
             btnScan.Enabled = false;
             btnQuarantine.Enabled = false;
             btnExport.Enabled = false;
+            btnExportRaw.Enabled = false;
             bar.Style = ProgressBarStyle.Continuous;
             bar.Maximum = ScanStepCount;
             bar.Value = 0;
@@ -1755,6 +1762,7 @@ namespace Aftermath
             bar.Visible = false;
             btnScan.Enabled = true;
             btnExport.Enabled = true;
+            btnExportRaw.Enabled = true;
         }
 
         private void UpdateOverview()
@@ -2135,6 +2143,58 @@ namespace Aftermath
                 MessageBox.Show(this, "Could not save: " + ex.Message, "Aftermath");
             }
         }
+
+        // Raw CSV/JSON export - Plus tier and above (Entitlements.HasRawExport).
+        // Free stays on the plain .txt report from OnExport; this handler is
+        // the only call site for Exporter.WriteCsv/WriteJson.
+        private void OnExportRaw(object sender, EventArgs e)
+        {
+            if (last == null) return;
+
+            if (!Entitlements.Current.HasRawExport)
+            {
+                MessageBox.Show(this,
+                    "CSV and JSON export require the Plus tier or higher. See Upgrade to unlock raw export.",
+                    "Aftermath");
+                return;
+            }
+
+            var sfd = new SaveFileDialog();
+            sfd.Filter = "CSV file|*.csv|JSON file|*.json";
+            sfd.FileName = "aftermath-report.csv";
+            if (sfd.ShowDialog(this) != DialogResult.OK) return;
+
+            var rows = new List<ExportRow>();
+            foreach (var c in Cats)
+            {
+                foreach (var f in last.ByCategory(c)
+                                     .OrderByDescending(x => (int)x.Severity)
+                                     .ThenByDescending(x => x.When))
+                {
+                    rows.Add(new ExportRow
+                    {
+                        Item = f.Title,
+                        Location = f.Path ?? "",
+                        Verdict = f.SevLabel,
+                        Action = f.Removable ? "Removable" : ""
+                    });
+                }
+            }
+
+            try
+            {
+                if (sfd.FilterIndex == 2)
+                    Exporter.WriteJson(rows, sfd.FileName);
+                else
+                    Exporter.WriteCsv(rows, sfd.FileName);
+                SetStatus("Report saved to " + sfd.FileName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save: " + ex.Message, "Aftermath");
+            }
+        }
+
     }
 
     public static class Program
