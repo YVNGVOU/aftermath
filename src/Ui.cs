@@ -17,7 +17,8 @@ namespace Aftermath
 {
     public class MainForm : Form
     {
-        private Button btnScan, btnElevate, btnMenu, btnQuarantine, btnExport, btnExportRaw, btnPro, btnWorkspace;
+        private Button btnScan, btnElevate, btnMenu, btnQuarantine, btnExport, btnExportRaw, btnExportPdf, btnPro, btnWorkspace;
+        private ToolTip tipExportPdf;
         private LinkLabel lnkPermDelete;
         private Label lblStatus, lblPageTitle, lblPageHelp;
         private BrandMark brandMark;
@@ -208,6 +209,7 @@ namespace Aftermath
             RefreshAutoTriggerToggle();
             RefreshScheduledDriftToggle();
             RefreshScanProfileSection();
+            RefreshExportPdfButton();
             nav.Select(Overview);
 
             if (autoScanOnLoad) Load += delegate { OnScan(this, EventArgs.Empty); };
@@ -724,6 +726,18 @@ namespace Aftermath
             btnExportRaw.Click += OnExportRaw;
             overview.Controls.Add(btnExportRaw);
 
+            // Branded PDF export is Pro+ (Entitlements.HasPdfExport). Unlike
+            // OnExportRaw (always clickable, message shown on click), this one
+            // is greyed out for Free/Plus per the spec - RefreshExportPdfButton
+            // owns the enabled state and the tooltip upgrade prompt, called on
+            // scan completion, license activation, and here at startup.
+            tipExportPdf = new ToolTip();
+            btnExportPdf = Flat("Export Branded PDF", 170, 34);
+            btnExportPdf.Location = new Point(550, 276);
+            btnExportPdf.Enabled = false;
+            btnExportPdf.Click += OnExportPdf;
+            overview.Controls.Add(btnExportPdf);
+
             btnQuarantine = Flat("Quarantine Checked", 160, 34);
             btnQuarantine.Location = new Point(186, 276);
             btnQuarantine.Enabled = false;
@@ -846,6 +860,25 @@ namespace Aftermath
             rowScheduledDrift.Description = on
                 ? "On - Aftermath captures a fresh Drift baseline daily at 09:00, headlessly."
                 : "Off - turn on to capture a fresh Drift baseline daily, without opening the app.";
+        }
+
+        // Branded PDF export button state - Pro+ per Entitlements.HasPdfExport.
+        // Below Pro the button stays visible but disabled/greyed with an
+        // upgrade tooltip, matching the toggle-row convention used for
+        // Scheduled Drift/Custom Scan Profiles rather than hiding the control
+        // outright, since it is a one-off action button, not a settings row.
+        // Also respects the has-a-result gate so it never fires with no scan.
+        private void RefreshExportPdfButton()
+        {
+            if (!Entitlements.Current.HasPdfExport)
+            {
+                btnExportPdf.Enabled = false;
+                tipExportPdf.SetToolTip(btnExportPdf, "Branded PDF export requires the Pro tier or higher. See Upgrade to unlock it.");
+                return;
+            }
+
+            tipExportPdf.SetToolTip(btnExportPdf, "Save a SINVAUX-branded PDF of this report.");
+            btnExportPdf.Enabled = last != null && !busy;
         }
 
         // Custom scan profiles is Max+. No Administrator gate here (unlike the
@@ -1317,6 +1350,7 @@ namespace Aftermath
             planPill.Invalidate();
             RefreshScheduledDriftToggle();
             RefreshScanProfileSection();
+            RefreshExportPdfButton();
             // Sidebar's Aftermath item set is rebuilt from Entitlements.Current
             // every time SwitchWorkspace(false) runs (see PopulateAftermathNav),
             // so the newly unlocked pages appear as soon as the user returns to
@@ -1517,7 +1551,7 @@ namespace Aftermath
             Color soft = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.16 : 0.10);
             Color softBorder = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.34 : 0.24);
             Color softHover = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.24 : 0.17);
-            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnExportRaw, btnMenu, btnPro, btnSweep, btnSaveRetention, btnActivateLicense })
+            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnExportRaw, btnExportPdf, btnMenu, btnPro, btnSweep, btnSaveRetention, btnActivateLicense })
             {
                 b.BackColor = soft;
                 b.ForeColor = p.Text;
@@ -1647,6 +1681,7 @@ namespace Aftermath
             btnQuarantine.Enabled = false;
             btnExport.Enabled = false;
             btnExportRaw.Enabled = false;
+            btnExportPdf.Enabled = false;
             bar.Style = ProgressBarStyle.Continuous;
             bar.Maximum = ScanStepCount;
             bar.Value = 0;
@@ -1763,6 +1798,7 @@ namespace Aftermath
             btnScan.Enabled = true;
             btnExport.Enabled = true;
             btnExportRaw.Enabled = true;
+            RefreshExportPdfButton();
         }
 
         private void UpdateOverview()
@@ -2195,6 +2231,63 @@ namespace Aftermath
             }
         }
 
+        // Branded PDF export - Pro tier and above (Entitlements.HasPdfExport).
+        // btnExportPdf is greyed out below Pro via RefreshExportPdfButton, but
+        // the entitlement is re-checked here too, same defense-in-depth as
+        // OnExportRaw, in case the button state is ever stale.
+        private void OnExportPdf(object sender, EventArgs e)
+        {
+            if (last == null) return;
+
+            if (!Entitlements.Current.HasPdfExport)
+            {
+                MessageBox.Show(this,
+                    "Branded PDF export requires the Pro tier or higher. See Upgrade to unlock it.",
+                    "Aftermath");
+                return;
+            }
+
+            var sfd = new SaveFileDialog();
+            sfd.Filter = "PDF file|*.pdf";
+            sfd.FileName = "aftermath-report.pdf";
+            if (sfd.ShowDialog(this) != DialogResult.OK) return;
+
+            var report = new PdfReport();
+            report.MachineName = Environment.MachineName;
+            report.GeneratedAtUtc = DateTime.UtcNow;
+            report.ScanNumber = 1;
+
+            report.Stats.Add(new PdfReportStat { Value = tSerious.Value, Label = tSerious.Caption });
+            report.Stats.Add(new PdfReportStat { Value = tCheck.Value, Label = tCheck.Caption });
+            report.Stats.Add(new PdfReportStat { Value = tOk.Value, Label = tOk.Caption });
+            report.Stats.Add(new PdfReportStat { Value = tRemovable.Value, Label = tRemovable.Caption });
+
+            foreach (var c in Cats)
+            {
+                foreach (var f in last.ByCategory(c)
+                                     .OrderByDescending(x => (int)x.Severity)
+                                     .ThenByDescending(x => x.When))
+                {
+                    report.Rows.Add(new PdfReportRow
+                    {
+                        Item = f.Title,
+                        Location = f.Path ?? "",
+                        Verdict = f.SevLabel,
+                        Action = f.Removable ? "Removable" : ""
+                    });
+                }
+            }
+
+            try
+            {
+                PdfWriter.Write(report, sfd.FileName);
+                SetStatus("Report saved to " + sfd.FileName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save: " + ex.Message, "Aftermath");
+            }
+        }
     }
 
     public static class Program
