@@ -22,10 +22,11 @@ namespace Aftermath
 
     public static class AccountClient
     {
-        // Placeholder until the site is deployed to a real domain - update
-        // this one constant when that happens. Nothing else in the app
-        // needs to change.
-        public const string BaseUrl = "https://sinvaux.com";
+        // Running on Fly's free *.fly.dev subdomain until there's enough
+        // revenue/growth to justify buying a custom domain (svaftermath.net
+        // is the planned name, not purchased yet - see DEPLOY.md step 7).
+        // Swap this one constant once that domain is live.
+        public const string BaseUrl = "https://sinvaux-website.fly.dev";
 
         public static AccountLoginResult Login(string email, string password)
         {

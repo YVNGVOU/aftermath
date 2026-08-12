@@ -92,16 +92,21 @@ namespace Aftermath
         }
     }
 
-    // Header lockup: SINVAUX wordmark, a Grenat hairline, then the product name.
-    // Grenat is capped at roughly 10% of any surface, so it appears here only as
-    // the rule and nowhere else in the band.
+    // Header lockup: the hex monogram, then "AFTERMATH" as the primary label -
+    // this is Aftermath's own product window, not a SINVAUX-branded shell, so
+    // the SINVAUX wordmark (the company's own name, spelled out) no longer
+    // belongs here. SINVAUX is credited on the Settings > About page instead.
+    // A Grenat hairline + SubLabel (e.g. "Settings") appears only when a
+    // workspace actually needs to say so - it used to always repeat the
+    // product name a second time next to the old wordmark, which reads as
+    // redundant now that "AFTERMATH" itself is the primary label. Grenat is
+    // capped at roughly 10% of any surface, so it appears here only as the
+    // rule and nowhere else in the band.
     public class BrandMark : Control
     {
-        // Text shown after the accent hairline - defaults to the product name
-        // (Brand.Product) but can be swapped so the header reads "Aftermath" or
-        // "Settings" depending on which workspace is active. Null/empty falls
-        // back to Brand.Product, so existing callers that never touch this see
-        // no change at all.
+        // Text shown after the accent hairline when set - e.g. "Settings"
+        // while that workspace is active. Null/empty means no second label:
+        // "AFTERMATH" alone already says what this window is.
         public string SubLabel;
 
         public BrandMark()
@@ -120,34 +125,33 @@ namespace Aftermath
             using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, ClientRectangle);
 
             int x = 0;
-            var mark = Brand.Wordmark();
+            var mark = Brand.Monogram();
             if (mark != null)
             {
-                // Wordmark is 512x115; scale to a 19px cap height and keep ratio.
-                int h = 19;
+                // Monogram is square; scale to a 22px box and keep ratio.
+                int h = 22;
                 int w = (int)Math.Round(mark.Width * (h / (double)mark.Height));
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                 g.DrawImage(mark, new Rectangle(x, (Height - h) / 2, w, h));
-                x += w + 14;
+                x += w + 10;
             }
-            else
+
+            var productFont = Brand.F(13f, FontStyle.Bold);
+            TextRenderer.DrawText(g, Brand.Product.ToUpperInvariant(), productFont,
+                new Rectangle(x, 0, 200, Height), p.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            x += TextRenderer.MeasureText(Brand.Product.ToUpperInvariant(), productFont).Width + 14;
+
+            if (!string.IsNullOrEmpty(SubLabel))
             {
-                // Fallback if the resource is missing: set in the body face, letterspaced.
-                var txt = Brand.Company;
-                TextRenderer.DrawText(g, txt, Brand.F(12f, FontStyle.Bold),
-                    new Rectangle(x, 0, 160, Height), p.Text,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
-                x += TextRenderer.MeasureText(txt, Brand.F(12f, FontStyle.Bold)).Width + 14;
+                using (var pen = new Pen(p.Accent, 1.5f))
+                    g.DrawLine(pen, x, (Height / 2) - 9, x, (Height / 2) + 9);
+                x += 14;
+
+                TextRenderer.DrawText(g, SubLabel, Brand.F(12.5f, FontStyle.Regular),
+                    new Rectangle(x, 0, Math.Max(40, Width - x), Height), p.Text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             }
-
-            using (var pen = new Pen(p.Accent, 1.5f))
-                g.DrawLine(pen, x, (Height / 2) - 9, x, (Height / 2) + 9);
-            x += 14;
-
-            string label = string.IsNullOrEmpty(SubLabel) ? Brand.Product : SubLabel;
-            TextRenderer.DrawText(g, label, Brand.F(12.5f, FontStyle.Regular),
-                new Rectangle(x, 0, Math.Max(40, Width - x), Height), p.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
 }

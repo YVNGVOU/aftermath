@@ -113,6 +113,19 @@ namespace Aftermath
             }
         }
 
+        // Signs out: deletes the local license so the next launch hits
+        // AccountGate again. Used by Settings > Connections' Log out action -
+        // every tier requires an account now, so this is the only way to
+        // switch accounts short of reinstalling.
+        public static void Clear()
+        {
+            lock (Lock)
+            {
+                try { if (File.Exists(StorePath)) File.Delete(StorePath); }
+                catch { }
+            }
+        }
+
         public static LicenseInfo Load()
         {
             lock (Lock)

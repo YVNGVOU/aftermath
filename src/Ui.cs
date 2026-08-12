@@ -25,6 +25,17 @@ namespace Aftermath
         private PlanPill planPill;
         private InfoCard proCard;
 
+        // Tray residency: the window minimizes AND closes to the tray rather
+        // than exiting - AutoTrigger's scheduled task launches a fresh --auto
+        // process on every Defender event regardless, so nothing depends on
+        // this window staying open, but a user running Aftermath as an
+        // always-available utility shouldn't have to reopen it by hand each
+        // time. exitRequested is the only path that lets Close() actually
+        // tear the app down - set exclusively by the tray menu's Exit item.
+        private NotifyIcon trayIcon;
+        private bool exitRequested;
+        private bool trayBalloonShown;
+
         // Points at the published feature roadmap - what free covers today and
         // what Pro adds. Kept as one constant so it is easy to repoint later.
         private const string RoadmapUrl = "https://claude.ai/code/artifact/1f64caa8-a291-43a4-98b4-a40c65fc8906";
@@ -76,6 +87,7 @@ namespace Aftermath
         private Label lblAccountCaption, lblAccountStatus;
         private TextBox txtAccountEmail, txtAccountPassword;
         private Button btnAccountLogin;
+        private LinkLabel lnkLogOut;
         private Label lblStoragePaths;
         private Panel retentionControls;
         private TextBox txtRetentionDays;
@@ -183,6 +195,10 @@ namespace Aftermath
             var ico = Brand.AppIcon();
             if (ico != null) Icon = ico;
 
+            BuildTrayIcon();
+            Resize += OnMainFormResize;
+            FormClosing += OnMainFormClosing;
+
             BuildHeader();
             BuildBottom();
             BuildSidebar();
@@ -213,6 +229,75 @@ namespace Aftermath
             nav.Select(Overview);
 
             if (autoScanOnLoad) Load += delegate { OnScan(this, EventArgs.Empty); };
+        }
+
+        // ---------- tray residency ----------
+
+        private void BuildTrayIcon()
+        {
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("Open Aftermath", null, delegate { RestoreFromTray(); });
+            menu.Items.Add("Run Triage Now", null, delegate
+            {
+                RestoreFromTray();
+                if (!busy) OnScan(this, EventArgs.Empty);
+            });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Exit", null, delegate
+            {
+                exitRequested = true;
+                Close();
+            });
+
+            trayIcon = new NotifyIcon();
+            trayIcon.Icon = Icon;
+            trayIcon.Text = Brand.FullName;
+            trayIcon.ContextMenuStrip = menu;
+            trayIcon.Visible = true;
+            trayIcon.DoubleClick += delegate { RestoreFromTray(); };
+        }
+
+        private void RestoreFromTray()
+        {
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
+        }
+
+        // Minimizing (not closing) also drops to the tray - a minimized
+        // window still owns a taskbar button and Alt+Tab slot that a
+        // background utility shouldn't. Only fires on the transition to
+        // Minimized, not on every resize.
+        private void OnMainFormResize(object sender, EventArgs e)
+        {
+            if (WindowState == FormWindowState.Minimized) HideToTray();
+        }
+
+        // The X button drops to tray instead of exiting - see the field
+        // comment on exitRequested for why. CloseReason distinguishes a
+        // real user click on X from Windows shutdown/task-end, which must
+        // still be allowed to close so the app doesn't block a shutdown.
+        private void OnMainFormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (exitRequested) { trayIcon.Visible = false; return; }
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                HideToTray();
+            }
+        }
+
+        private void HideToTray()
+        {
+            Hide();
+            if (!trayBalloonShown)
+            {
+                trayBalloonShown = true;
+                trayIcon.ShowBalloonTip(3000, Brand.FullName,
+                    "Still running here - right-click the tray icon for Run Triage Now or Exit.",
+                    ToolTipIcon.None);
+            }
         }
 
         // Before any scan this session, the Drift page's empty state depends on
@@ -1319,6 +1404,17 @@ namespace Aftermath
             lblAccountStatus.Height = 20;
             pgConnections.Controls.Add(lblAccountStatus);
 
+            // Every tier requires an account now, so this is the only way to
+            // switch accounts short of reinstalling - restarts the app back
+            // into AccountGate rather than trying to swap the signed-in
+            // account underneath an already-running MainForm.
+            lnkLogOut = new LinkLabel();
+            lnkLogOut.Text = "Log out";
+            lnkLogOut.Location = new Point(22, 300);
+            lnkLogOut.AutoSize = true;
+            lnkLogOut.Click += OnLogOut;
+            pgConnections.Controls.Add(lnkLogOut);
+
             pgConnections.Resize += delegate
             {
                 int w = Math.Max(200, pgConnections.ClientSize.Width - 44);
@@ -1416,6 +1512,18 @@ namespace Aftermath
 
             txtAccountPassword.Text = "";
             ApplyActivatedLicense(lblAccountStatus);
+        }
+
+        private void OnLogOut(object sender, EventArgs e)
+        {
+            var confirm = MessageBox.Show(this,
+                "Log out of Aftermath? You'll need to sign in again to reopen the app.",
+                "Log out", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
+
+            LicenseStore.Clear();
+            exitRequested = true;
+            Application.Restart();
         }
 
         // Verifies the pasted key offline via LicenseStore.TryVerify (through
@@ -2292,6 +2400,17 @@ namespace Aftermath
 
     public static class Program
     {
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        private const int SW_RESTORE = 9;
+
         [STAThread]
         public static void Main()
         {
@@ -2319,9 +2438,37 @@ namespace Aftermath
                 return;
             }
 
+            // Now that the window can live in the tray instead of exiting,
+            // AutoTrigger's scheduled --auto relaunch (or a user just
+            // double-clicking the exe again) would otherwise spawn a second
+            // tray icon and window alongside a still-running instance. The
+            // mutex is process-lifetime, not disposed explicitly - released
+            // automatically when this process exits, same as the window it
+            // guards.
+            bool createdNew;
+            var singleInstance = new System.Threading.Mutex(true, "Local\\AftermathSingleInstance", out createdNew);
+            if (!createdNew)
+            {
+                var existing = FindWindow(null, Brand.FullName);
+                if (existing != IntPtr.Zero)
+                {
+                    ShowWindow(existing, SW_RESTORE);
+                    SetForegroundWindow(existing);
+                }
+                return;
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm(auto));
+
+            // Every tier now requires a signed-in account, including Free -
+            // this is the one gate the whole app sits behind. EnsureSignedIn
+            // shows a blocking login dialog when no verified license exists
+            // yet; declining it means the app simply doesn't open.
+            if (AccountGate.EnsureSignedIn())
+                Application.Run(new MainForm(auto));
+
+            GC.KeepAlive(singleInstance);
         }
 
         // Runs the exact same steps OnScan's background thread runs, but
