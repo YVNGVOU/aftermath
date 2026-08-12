@@ -73,6 +73,11 @@ namespace Aftermath
         private Panel pgSystem;
         private TabStrip systemTabs;
         private FindingList systemList;
+        // Network page: promoted out of the System tab group into its own
+        // sidebar item (still Plus+, same gate as System) - see
+        // NetworkCenter.cs. Owns its own live-refresh, so it does not share
+        // catFindings["Network"] with the System tabs the way it used to.
+        private NetworkCenter pgNetwork;
         private Dictionary<string, List<Finding>> catFindings = new Dictionary<string, List<Finding>>();
         private FindingList cleanupList;
         private FindingList driftList;
@@ -137,6 +142,7 @@ namespace Aftermath
         private const string Warnings = "Warnings";
         private const string Activity = "Activity";
         private const string SystemPage = "System";
+        private const string NetworkPage = "Network";
         private const string Cleanup = "Cleanup";
         private const string Quarantine = "Quarantine";
         private const string Drift = "Drift";
@@ -581,6 +587,10 @@ namespace Aftermath
             {
                 nav.Add(Cats[3], Cats[3], Glyphs[Cats[3]]);
                 nav.Add(SystemPage, SystemPage, Glyphs["System"]);
+                // Promoted out of the System tab group into its own page - same
+                // Plus+ gate as System since it is the same "real, on-demand" tier
+                // of check, just given room to breathe instead of a shared tab.
+                nav.Add(NetworkPage, NetworkPage, Glyphs["Network"]);
             }
             nav.Add(Drift, Drift, Glyphs[Drift]);
             // Max+ only: timestamped findings only exist meaningfully once Plus's
@@ -732,7 +742,12 @@ namespace Aftermath
             systemTabs.Dock = DockStyle.Top;
             systemTabs.AddTab(Cats[4], Cats[4]);   // Startup
             systemTabs.AddTab(Cats[5], Cats[5]);   // Persistence
-            systemTabs.AddTab(Cats[6], Cats[6]);   // Network
+            // Network (Cats[6]) was removed from this tab group - it now has
+            // its own sidebar page (NetworkPage) with live data instead of
+            // sharing this scan-time-only tab. Cats[6] itself stays in Cats[]
+            // unchanged - Deep.Network() still populates lists["Network"]/
+            // catFindings["Network"] for exports and the Detections/Warnings
+            // cross-cut, it just no longer has a tab here to display in.
             systemTabs.AddTab(Cats[7], Cats[7]);   // System
             systemTabs.TabSelected += delegate (object s, string key)
             {
@@ -744,6 +759,14 @@ namespace Aftermath
             pgSystem.Controls.Add(systemList);
             pgSystem.Controls.Add(systemTabs);
             contentHost.Controls.Add(pgSystem);
+
+            // Network page - own sidebar item now, see NetworkCenter.cs. Built
+            // unconditionally like every other page (cheap construction), only
+            // ever reachable via nav when PopulateAftermathNav's
+            // HasArtifactsPages check adds its sidebar item.
+            pgNetwork = new NetworkCenter();
+            pgNetwork.Visible = false;
+            contentHost.Controls.Add(pgNetwork);
 
             // cleanup page
             cleanupList = new FindingList();
@@ -2003,6 +2026,8 @@ namespace Aftermath
             pgDetections.Visible = (key == Detections);
             pgWarnings.Visible = (key == Warnings);
             pgSystem.Visible = (key == SystemPage);
+            pgNetwork.Visible = (key == NetworkPage);
+            if (key == NetworkPage) pgNetwork.RefreshData();
             // Artifacts is still its own single-category page; History's data now
             // shows under the Activity key. Every other lists[c] entry (Detections/
             // Exposure/Startup/Persistence/Network/System) still gets populated by
@@ -2151,6 +2176,7 @@ namespace Aftermath
             pgDetections.BackColor = p.Bg;
             pgWarnings.BackColor = p.Bg;
             pgSystem.BackColor = p.Bg;
+            pgNetwork.Restyle();
             detectionsList.BackColor = p.Bg;
             warningsList.BackColor = p.Bg;
             systemList.BackColor = p.Bg;
