@@ -117,7 +117,8 @@ namespace Aftermath
         private Button btnActivateLicense;
         private Label lblLicenseStatus;
         private Label lblSettingsIntro, lblStorageCaption, lblConnectionsCaption, lblAboutName,
-            lblAboutBody, lblRetentionDaysCaption;
+            lblAboutBody, lblRetentionDaysCaption, lblAboutVersion, lblUpdateStatus;
+        private Button btnCheckUpdate;
 
         private const string Overview = "Overview";
         private const string Detections = "Detections";
@@ -1655,7 +1656,103 @@ namespace Aftermath
             lblAboutBody.Height = 72;
             pgAbout.Controls.Add(lblAboutBody);
 
-            pgAbout.Resize += delegate { lblAboutBody.Width = Math.Max(200, pgAbout.ClientSize.Width - 44); };
+            lblAboutVersion = new Label();
+            lblAboutVersion.Text = "Version " + Brand.Version;
+            lblAboutVersion.Location = new Point(22, 126);
+            lblAboutVersion.AutoSize = true;
+            pgAbout.Controls.Add(lblAboutVersion);
+
+            btnCheckUpdate = Flat("Check for Updates", 160, 30);
+            btnCheckUpdate.Location = new Point(22, 150);
+            btnCheckUpdate.Click += OnCheckForUpdate;
+            pgAbout.Controls.Add(btnCheckUpdate);
+
+            lblUpdateStatus = new Label();
+            lblUpdateStatus.Location = new Point(192, 156);
+            lblUpdateStatus.AutoSize = false;
+            lblUpdateStatus.Height = 20;
+            pgAbout.Controls.Add(lblUpdateStatus);
+
+            pgAbout.Resize += delegate
+            {
+                lblAboutBody.Width = Math.Max(200, pgAbout.ClientSize.Width - 44);
+                lblUpdateStatus.Width = Math.Max(120, pgAbout.ClientSize.Width - 44 - 170);
+            };
+        }
+
+        // Runs the version check on a background thread - it's a network
+        // call, same reason OnScan/Login-style calls elsewhere in this app
+        // never run inline on the UI thread. Update result handling and the
+        // actual download both go through this one entry point so there is
+        // only one place that flips btnCheckUpdate.Enabled.
+        private void OnCheckForUpdate(object sender, EventArgs e)
+        {
+            btnCheckUpdate.Enabled = false;
+            lblUpdateStatus.Text = "Checking...";
+            lblUpdateStatus.ForeColor = Theme.P.TextDim;
+
+            var t = new Thread(delegate ()
+            {
+                UpdateInfo info = null;
+                string error = null;
+                try { info = UpdateChecker.CheckForUpdate(); }
+                catch (Exception ex) { error = ex.Message; }
+                BeginInvoke(new Action(delegate { OnUpdateChecked(info, error); }));
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void OnUpdateChecked(UpdateInfo info, string error)
+        {
+            btnCheckUpdate.Enabled = true;
+
+            if (error != null)
+            {
+                lblUpdateStatus.Text = "Could not check for updates.";
+                return;
+            }
+
+            if (info == null)
+            {
+                lblUpdateStatus.Text = "You're on the latest version.";
+                return;
+            }
+
+            lblUpdateStatus.Text = "Version " + info.Version + " is available.";
+
+            string notes = string.IsNullOrEmpty(info.Notes) ? "" : "\n\n" + info.Notes;
+            var result = MessageBox.Show(this,
+                "Version " + info.Version + " is available." + notes + "\n\nDownload and install now? Aftermath will restart.",
+                "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (result != DialogResult.Yes) return;
+
+            btnCheckUpdate.Enabled = false;
+            var t = new Thread(delegate ()
+            {
+                try
+                {
+                    UpdateChecker.DownloadAndApply(info, delegate (string s)
+                    {
+                        BeginInvoke(new Action(delegate { lblUpdateStatus.Text = s; }));
+                    });
+                    // The swap-and-relaunch batch is already running and
+                    // waiting for this process to exit - Application.Exit()
+                    // must run on the UI thread.
+                    BeginInvoke(new Action(delegate { Application.Exit(); }));
+                }
+                catch (Exception ex)
+                {
+                    string msg = ex.Message;
+                    BeginInvoke(new Action(delegate
+                    {
+                        btnCheckUpdate.Enabled = true;
+                        lblUpdateStatus.Text = "Update failed: " + msg;
+                    }));
+                }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         // ---------- navigation ----------
@@ -1754,7 +1851,7 @@ namespace Aftermath
             Color soft = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.16 : 0.10);
             Color softBorder = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.34 : 0.24);
             Color softHover = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.24 : 0.17);
-            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnExportRaw, btnExportPdf, btnMenu, btnPro, btnSweep, btnSaveRetention, btnActivateLicense })
+            foreach (var b in new Button[] { btnWorkspace, btnElevate, btnExport, btnExportRaw, btnExportPdf, btnMenu, btnPro, btnSweep, btnSaveRetention, btnActivateLicense, btnCheckUpdate })
             {
                 b.BackColor = soft;
                 b.ForeColor = p.Text;
@@ -1801,7 +1898,7 @@ namespace Aftermath
                 tb.BorderStyle = BorderStyle.FixedSingle;
             }
             lblAccountStatus.ForeColor = p.TextDim;
-            foreach (var lbl in new Label[] { lblSettingsIntro, lblConnectionsCaption, lblAccountCaption, lblAboutBody, lblRetentionDaysCaption })
+            foreach (var lbl in new Label[] { lblSettingsIntro, lblConnectionsCaption, lblAccountCaption, lblAboutBody, lblRetentionDaysCaption, lblAboutVersion, lblUpdateStatus })
                 lbl.ForeColor = p.TextDim;
             foreach (var lbl in new Label[] { lblStorageCaption, lblAboutName })
                 lbl.ForeColor = p.Text;

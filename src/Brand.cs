@@ -20,6 +20,12 @@ namespace Aftermath
         public const string Product = "Aftermath";              // branded house: SINVAUX <plain noun>
         public const string FullName = "SINVAUX Aftermath";
 
+        // Bumped by hand on every release that gets uploaded to the update
+        // archive - see UpdateChecker.cs. No build system stamps this
+        // automatically (no csproj/AssemblyInfo in this project), so it is
+        // the one thing to remember to change before running publish-release.
+        public const string Version = "1.0.0";
+
         // Supporting typeface per the design system; Segoe UI if Inter is absent.
         private static string bodyFace;
         public static string BodyFace
