@@ -45,7 +45,7 @@ namespace Aftermath
         // Settings workspace pages - hidden/shown by ShowPage exactly like the
         // Aftermath pages above, just a second set of Panels in the same
         // contentHost rather than a second content area.
-        private Panel settingsHome, pgAppearance, pgAdmin, pgScanBehavior, pgData, pgConnections, pgAbout;
+        private Panel settingsHome, pgAppearance, pgAdmin, pgScanBehavior, pgData, pgLicense, pgAccount, pgAbout;
         private UpgradePage pgUpgrade;
         // Owner Workspace - only ever added to nav/contentHost when
         // Entitlements.Current.IsOwner is true (see PopulateAftermathNav);
@@ -154,7 +154,13 @@ namespace Aftermath
         private const string SetAdmin = "Administrator";
         private const string SetScanBehavior = "Scan Behavior";
         private const string SetData = "Data";
-        private const string SetConnections = "Connections";
+        // Split from a single "Connections" page that used to conflate two
+        // different things: a license key (this app's own offline-verified
+        // credential) and a SINVAUX account login (the website's, a
+        // convenience layer over the same license path). Different concepts,
+        // different pages, per the settings-cleanup pass.
+        private const string SetLicense = "License";
+        private const string SetAccount = "Account";
         private const string SetAbout = "About";
 
         // Exact count of sequential steps OnScan's background thread runs through -
@@ -218,7 +224,8 @@ namespace Aftermath
             { SetAdmin,       "Check whether Aftermath is running with Administrator rights, and relaunch elevated if not." },
             { SetScanBehavior,"Choose whether Aftermath triages automatically right after Windows Defender scans." },
             { SetData,        "Where SINVAUX stores its files on this machine, and how long quarantined items are kept." },
-            { SetConnections, "External services SINVAUX connects to." },
+            { SetLicense,     "Activate or check the license key that unlocks a paid tier." },
+            { SetAccount,     "Log in with your SINVAUX account to fetch your license automatically, or log out." },
             { SetAbout,       "Product information." }
         };
 
@@ -607,7 +614,9 @@ namespace Aftermath
         // Builds the Settings item set - real capabilities only, per the audit:
         // Appearance (theme), Administrator (elevation), Scan Behavior
         // (auto-trigger), Data (storage paths + quarantine retention),
-        // Connections (honest empty state), About (product info).
+        // License (key activation) + Account (SINVAUX login) - split from a
+        // single "Connections" page, see SetLicense's field comment for why -
+        // About (product info).
         private void PopulateSettingsNav()
         {
             nav.Add(SettingsHome, SettingsHome, "⚙");
@@ -619,8 +628,9 @@ namespace Aftermath
             nav.Add(SetScanBehavior, SetScanBehavior, "⏱");
             nav.AddSection("Data");
             nav.Add(SetData, SetData, "🗄");
-            nav.AddSection("Connections");
-            nav.Add(SetConnections, SetConnections, "🔗");
+            nav.AddSection("Account");
+            nav.Add(SetLicense, SetLicense, "🔑");
+            nav.Add(SetAccount, SetAccount, "👤");
             nav.AddSection("About");
             nav.Add(SetAbout, SetAbout, "ℹ");
         }
@@ -807,8 +817,10 @@ namespace Aftermath
             contentHost.Controls.Add(pgScanBehavior);
             BuildSettingsData();
             contentHost.Controls.Add(pgData);
-            BuildSettingsConnections();
-            contentHost.Controls.Add(pgConnections);
+            BuildSettingsLicense();
+            contentHost.Controls.Add(pgLicense);
+            BuildSettingsAccount();
+            contentHost.Controls.Add(pgAccount);
             BuildSettingsAbout();
             contentHost.Controls.Add(pgAbout);
 
@@ -1297,21 +1309,28 @@ namespace Aftermath
             cardData.Clicked += delegate { nav.Select(SetData); };
             settingsHome.Controls.Add(cardData);
 
-            var cardConn = new SettingsCard();
-            cardConn.Title = "Connections";
-            cardConn.Description = "External services SINVAUX connects to.";
-            cardConn.Location = new Point(22, 328);
-            cardConn.Clicked += delegate { nav.Select(SetConnections); };
-            settingsHome.Controls.Add(cardConn);
+            var cardLicense = new SettingsCard();
+            cardLicense.Title = "License";
+            cardLicense.Description = "Activate or check the license key that unlocks a paid tier.";
+            cardLicense.Location = new Point(22, 328);
+            cardLicense.Clicked += delegate { nav.Select(SetLicense); };
+            settingsHome.Controls.Add(cardLicense);
+
+            var cardAccount = new SettingsCard();
+            cardAccount.Title = "Account";
+            cardAccount.Description = "Log in with your SINVAUX account, or log out.";
+            cardAccount.Location = new Point(22, 400);
+            cardAccount.Clicked += delegate { nav.Select(SetAccount); };
+            settingsHome.Controls.Add(cardAccount);
 
             var cardAbout = new SettingsCard();
             cardAbout.Title = "About";
             cardAbout.Description = "Product information.";
-            cardAbout.Location = new Point(22, 400);
+            cardAbout.Location = new Point(22, 472);
             cardAbout.Clicked += delegate { nav.Select(SetAbout); };
             settingsHome.Controls.Add(cardAbout);
 
-            var cards = new SettingsCard[] { cardAppearance, cardAdmin, cardScan, cardData, cardConn, cardAbout };
+            var cards = new SettingsCard[] { cardAppearance, cardAdmin, cardScan, cardData, cardLicense, cardAccount, cardAbout };
             settingsHome.Resize += delegate
             {
                 int w = Math.Max(200, settingsHome.ClientSize.Width - 44);
@@ -1580,19 +1599,26 @@ namespace Aftermath
         // verifies + persists it via LicenseStore, then Entitlements.Reload()
         // picks it up live (no restart). Failure shows the real reason, never a
         // fabricated success state.
-        private void BuildSettingsConnections()
+        // ACCOUNT > License - the license key itself: activate one by hand, or
+        // check the currently active one. Split from account login (below) -
+        // these used to share one "Connections" page, but a license key and a
+        // SINVAUX account are different credentials with different failure
+        // modes (a key can be valid with no account ever involved; an account
+        // login is just a convenience layer that fetches a key, per
+        // OnAccountLogin's comment).
+        private void BuildSettingsLicense()
         {
-            pgConnections = new Panel();
-            pgConnections.Dock = DockStyle.Fill;
-            pgConnections.Visible = false;
-            pgConnections.Padding = new Padding(22, 10, 22, 10);
+            pgLicense = new Panel();
+            pgLicense.Dock = DockStyle.Fill;
+            pgLicense.Visible = false;
+            pgLicense.Padding = new Padding(22, 10, 22, 10);
 
             lblConnectionsCaption = new Label();
             lblConnectionsCaption.Text = "Paste a license key to unlock a higher tier.";
             lblConnectionsCaption.Location = new Point(22, 8);
             lblConnectionsCaption.AutoSize = false;
             lblConnectionsCaption.Height = 20;
-            pgConnections.Controls.Add(lblConnectionsCaption);
+            pgLicense.Controls.Add(lblConnectionsCaption);
 
             connCard = new ConnectionCard();
             LicenseInfo current = LicenseStore.Load();
@@ -1602,60 +1628,78 @@ namespace Aftermath
                 ? "Licensed - " + LicenseStore.DisplayTierLabel() + ", expires " + current.ExpiresUtc.ToString("yyyy-MM-dd")
                 : "No license activated yet. SINVAUX runs at the Free tier until one is added.";
             connCard.Location = new Point(22, 40);
-            pgConnections.Controls.Add(connCard);
+            pgLicense.Controls.Add(connCard);
 
             txtLicenseKey = new TextBox();
             txtLicenseKey.Location = new Point(22, 132);
             txtLicenseKey.Height = 24;
-            pgConnections.Controls.Add(txtLicenseKey);
+            pgLicense.Controls.Add(txtLicenseKey);
 
             btnActivateLicense = Flat("Activate", 90, 26);
             btnActivateLicense.Location = new Point(22, 164);
             btnActivateLicense.Click += OnActivateLicense;
-            pgConnections.Controls.Add(btnActivateLicense);
+            pgLicense.Controls.Add(btnActivateLicense);
 
             lblLicenseStatus = new Label();
             lblLicenseStatus.Location = new Point(120, 168);
             lblLicenseStatus.AutoSize = false;
             lblLicenseStatus.Height = 20;
-            pgConnections.Controls.Add(lblLicenseStatus);
+            pgLicense.Controls.Add(lblLicenseStatus);
 
-            // Account login - a convenience layer over the manual paste above.
-            // AccountClient hits the SINVAUX website and, on success, feeds the
-            // returned key through the exact same LicenseStore.SaveVerified path
-            // as a hand-pasted key, so the offline signature check still governs
-            // what actually gets trusted - a reachable-but-malicious server could
-            // return garbage, but it could never forge a signature that verifies.
+            pgLicense.Resize += delegate
+            {
+                int w = Math.Max(200, pgLicense.ClientSize.Width - 44);
+                lblConnectionsCaption.Width = w;
+                connCard.Width = w;
+                txtLicenseKey.Width = Math.Max(160, w - 200);
+                lblLicenseStatus.Width = Math.Max(80, w - 98);
+            };
+        }
+
+        // ACCOUNT > Account - login is a convenience layer over the license
+        // paste above. AccountClient hits the SINVAUX website and, on
+        // success, feeds the returned key through the exact same
+        // LicenseStore.SaveVerified path as a hand-pasted key, so the
+        // offline signature check still governs what actually gets trusted -
+        // a reachable-but-malicious server could return garbage, but it
+        // could never forge a signature that verifies.
+        private void BuildSettingsAccount()
+        {
+            pgAccount = new Panel();
+            pgAccount.Dock = DockStyle.Fill;
+            pgAccount.Visible = false;
+            pgAccount.Padding = new Padding(22, 10, 22, 10);
+
             lblAccountCaption = new Label();
-            lblAccountCaption.Text = "Or log in with your SINVAUX account to fetch your license automatically.";
-            lblAccountCaption.Location = new Point(22, 210);
+            lblAccountCaption.Text = "Log in with your SINVAUX account to fetch your license automatically.";
+            lblAccountCaption.Location = new Point(22, 8);
             lblAccountCaption.AutoSize = false;
             lblAccountCaption.Height = 20;
-            pgConnections.Controls.Add(lblAccountCaption);
+            pgAccount.Controls.Add(lblAccountCaption);
 
             txtAccountEmail = new TextBox();
-            txtAccountEmail.Location = new Point(22, 234);
+            txtAccountEmail.Location = new Point(22, 32);
             txtAccountEmail.Width = 220;
             txtAccountEmail.Height = 24;
-            pgConnections.Controls.Add(txtAccountEmail);
+            pgAccount.Controls.Add(txtAccountEmail);
 
             txtAccountPassword = new TextBox();
-            txtAccountPassword.Location = new Point(250, 234);
+            txtAccountPassword.Location = new Point(250, 32);
             txtAccountPassword.Width = 160;
             txtAccountPassword.Height = 24;
             txtAccountPassword.PasswordChar = '*';
-            pgConnections.Controls.Add(txtAccountPassword);
+            pgAccount.Controls.Add(txtAccountPassword);
 
             btnAccountLogin = Flat("Log in", 90, 26);
-            btnAccountLogin.Location = new Point(22, 266);
+            btnAccountLogin.Location = new Point(22, 64);
             btnAccountLogin.Click += OnAccountLogin;
-            pgConnections.Controls.Add(btnAccountLogin);
+            pgAccount.Controls.Add(btnAccountLogin);
 
             lblAccountStatus = new Label();
-            lblAccountStatus.Location = new Point(120, 270);
+            lblAccountStatus.Location = new Point(120, 68);
             lblAccountStatus.AutoSize = false;
             lblAccountStatus.Height = 20;
-            pgConnections.Controls.Add(lblAccountStatus);
+            pgAccount.Controls.Add(lblAccountStatus);
 
             // Every tier requires an account now, so this is the only way to
             // switch accounts short of reinstalling - restarts the app back
@@ -1663,18 +1707,14 @@ namespace Aftermath
             // account underneath an already-running MainForm.
             lnkLogOut = new LinkLabel();
             lnkLogOut.Text = "Log out";
-            lnkLogOut.Location = new Point(22, 300);
+            lnkLogOut.Location = new Point(22, 98);
             lnkLogOut.AutoSize = true;
             lnkLogOut.Click += OnLogOut;
-            pgConnections.Controls.Add(lnkLogOut);
+            pgAccount.Controls.Add(lnkLogOut);
 
-            pgConnections.Resize += delegate
+            pgAccount.Resize += delegate
             {
-                int w = Math.Max(200, pgConnections.ClientSize.Width - 44);
-                lblConnectionsCaption.Width = w;
-                connCard.Width = w;
-                txtLicenseKey.Width = Math.Max(160, w - 200);
-                lblLicenseStatus.Width = Math.Max(80, w - 98);
+                int w = Math.Max(200, pgAccount.ClientSize.Width - 44);
                 lblAccountCaption.Width = w;
                 lblAccountStatus.Width = Math.Max(80, w - 98);
             };
@@ -1937,7 +1977,8 @@ namespace Aftermath
             pgAdmin.Visible = (key == SetAdmin);
             pgScanBehavior.Visible = (key == SetScanBehavior);
             pgData.Visible = (key == SetData);
-            pgConnections.Visible = (key == SetConnections);
+            pgLicense.Visible = (key == SetLicense);
+            pgAccount.Visible = (key == SetAccount);
             pgAbout.Visible = (key == SetAbout);
 
             lblPageTitle.Text = key;
@@ -1961,7 +2002,7 @@ namespace Aftermath
             sweepInputs.BackColor = p.Bg;
             sweepResultsHost.BackColor = p.Bg;
 
-            foreach (var pg in new Panel[] { settingsHome, pgAppearance, pgAdmin, pgScanBehavior, pgData, pgConnections, pgAbout })
+            foreach (var pg in new Panel[] { settingsHome, pgAppearance, pgAdmin, pgScanBehavior, pgData, pgLicense, pgAccount, pgAbout })
                 pg.BackColor = p.Bg;
 
             brandMark.BackColor = p.Panel;
