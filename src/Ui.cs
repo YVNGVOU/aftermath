@@ -278,6 +278,74 @@ namespace Aftermath
             nav.Select(Overview);
 
             if (autoScanOnLoad) Load += delegate { OnScan(this, EventArgs.Empty); };
+
+            // Update checking used to be reachable only via a button buried in
+            // Settings > About - easy to never see. Check once, silently, on
+            // every launch instead, and only surface a popup if there's
+            // actually something to offer (never "you're up to date" noise on
+            // startup - that stays a manual-check-only message, see
+            // OnCheckForUpdate).
+            Load += delegate { CheckForUpdateOnStartup(); };
+        }
+
+        private void CheckForUpdateOnStartup()
+        {
+            var t = new Thread(delegate ()
+            {
+                UpdateInfo info = null;
+                try { info = UpdateChecker.CheckForUpdate(); }
+                catch { }
+                if (info != null)
+                    BeginInvoke(new Action(delegate { PromptRelaunchForUpdate(info); }));
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        // The actual ask: not a button someone has to find, a direct prompt.
+        // Declining just leaves it for the next launch (or the About page's
+        // button) - nothing is forced.
+        private void PromptRelaunchForUpdate(UpdateInfo info)
+        {
+            string notes = string.IsNullOrEmpty(info.Notes) ? "" : "\n\n" + info.Notes;
+            var result = MessageBox.Show(this,
+                "A new version of " + Brand.FullName + " is available (v" + info.Version + ")." + notes +
+                "\n\nRelaunch now to update?",
+                "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (result != DialogResult.Yes) return;
+
+            ApplyUpdateAndRelaunch(info);
+        }
+
+        // Shared by the startup prompt and the manual About-page button so
+        // there is exactly one download-and-relaunch code path. onFailure is
+        // optional UI cleanup specific to whichever caller started this (e.g.
+        // re-enabling btnCheckUpdate) - always called on the UI thread.
+        private void ApplyUpdateAndRelaunch(UpdateInfo info, Action onFailure = null)
+        {
+            var t = new Thread(delegate ()
+            {
+                try
+                {
+                    UpdateChecker.DownloadAndApply(info, delegate (string s)
+                    {
+                        BeginInvoke(new Action(delegate { SetStatus(s); }));
+                    });
+                    BeginInvoke(new Action(delegate { Application.Exit(); }));
+                }
+                catch (Exception ex)
+                {
+                    string msg = ex.Message;
+                    BeginInvoke(new Action(delegate
+                    {
+                        MessageBox.Show(this, "Update failed: " + msg, Brand.FullName,
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        if (onFailure != null) onFailure();
+                    }));
+                }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         // ---------- tray residency ----------
@@ -1829,31 +1897,7 @@ namespace Aftermath
             if (result != DialogResult.Yes) return;
 
             btnCheckUpdate.Enabled = false;
-            var t = new Thread(delegate ()
-            {
-                try
-                {
-                    UpdateChecker.DownloadAndApply(info, delegate (string s)
-                    {
-                        BeginInvoke(new Action(delegate { lblUpdateStatus.Text = s; }));
-                    });
-                    // The swap-and-relaunch batch is already running and
-                    // waiting for this process to exit - Application.Exit()
-                    // must run on the UI thread.
-                    BeginInvoke(new Action(delegate { Application.Exit(); }));
-                }
-                catch (Exception ex)
-                {
-                    string msg = ex.Message;
-                    BeginInvoke(new Action(delegate
-                    {
-                        btnCheckUpdate.Enabled = true;
-                        lblUpdateStatus.Text = "Update failed: " + msg;
-                    }));
-                }
-            });
-            t.IsBackground = true;
-            t.Start();
+            ApplyUpdateAndRelaunch(info, delegate { btnCheckUpdate.Enabled = true; });
         }
 
         // ---------- navigation ----------
