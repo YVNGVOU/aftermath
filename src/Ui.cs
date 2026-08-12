@@ -110,8 +110,8 @@ namespace Aftermath
         // Settings workspace controls - see BuildSettings*() below. Kept as
         // fields only where a handler or a Refresh* method needs to reach them
         // again later, same rule the rest of this class already follows.
-        private Toggle toggleTheme, toggleAutoTrigger, toggleScheduledDrift;
-        private SettingRow rowAppearance, rowAdmin, rowScanBehavior, rowScheduledDrift, rowRetention;
+        private Toggle toggleTheme, toggleAutoTrigger, toggleScheduledDrift, toggleLaunchAtLogon;
+        private SettingRow rowAppearance, rowAdmin, rowScanBehavior, rowScheduledDrift, rowRetention, rowLaunchAtLogon;
         private Label lblScanProfileTitle, lblScanProfileDesc;
         private TextBox txtScanProfile;
         private Button btnSaveScanProfile;
@@ -280,6 +280,7 @@ namespace Aftermath
             RefreshDriftEmptyText();
             RefreshAutoTriggerToggle();
             RefreshScheduledDriftToggle();
+            RefreshLaunchAtLogonToggle();
             RefreshScanProfileSection();
             RefreshExportPdfButton();
             nav.Select(Overview);
@@ -1395,7 +1396,52 @@ namespace Aftermath
             rowAdmin.SetControl(btnElevate);
             pgAdmin.Controls.Add(rowAdmin);
 
-            pgAdmin.Resize += delegate { rowAdmin.Width = Math.Max(200, pgAdmin.ClientSize.Width - 44); };
+            // One toggle covering both "run on startup" and "run as admin" -
+            // see LaunchAtLogon.cs's header comment for why those can't
+            // honestly be two separate settings (a plain startup entry runs
+            // unelevated, and there's no way to silently re-elevate that
+            // without a UAC prompt short of this logon-triggered task).
+            rowLaunchAtLogon = new SettingRow();
+            rowLaunchAtLogon.Label = "Launch at sign-in";
+            rowLaunchAtLogon.Location = new Point(22, 8 + rowAdmin.Height + 10);
+
+            toggleLaunchAtLogon = new Toggle();
+            toggleLaunchAtLogon.CheckedChanged += delegate
+            {
+                bool wantOn = toggleLaunchAtLogon.Checked;
+                bool ok = wantOn ? LaunchAtLogon.Register() : LaunchAtLogon.Unregister();
+                if (!ok) MessageBox.Show(this, "Could not update the scheduled task.", "Aftermath");
+                RefreshLaunchAtLogonToggle();
+            };
+            rowLaunchAtLogon.SetControl(toggleLaunchAtLogon);
+            pgAdmin.Controls.Add(rowLaunchAtLogon);
+
+            pgAdmin.Resize += delegate
+            {
+                rowAdmin.Width = Math.Max(200, pgAdmin.ClientSize.Width - 44);
+                rowLaunchAtLogon.Width = Math.Max(200, pgAdmin.ClientSize.Width - 44);
+            };
+        }
+
+        // Same Administrator-gate pattern as RefreshAutoTriggerToggle -
+        // creating a logon-triggered elevated task needs Administrator, same
+        // as the event-triggered one AutoTrigger registers.
+        private void RefreshLaunchAtLogonToggle()
+        {
+            if (!Elevation.IsAdmin())
+            {
+                toggleLaunchAtLogon.Enabled = false;
+                toggleLaunchAtLogon.Checked = false;
+                rowLaunchAtLogon.Description = "Requires Administrator - see Run as Admin above.";
+                return;
+            }
+
+            toggleLaunchAtLogon.Enabled = true;
+            bool on = LaunchAtLogon.IsRegistered();
+            toggleLaunchAtLogon.Checked = on;
+            rowLaunchAtLogon.Description = on
+                ? "On - Aftermath opens automatically, already elevated, when you sign in."
+                : "Off - turn on to have Aftermath open automatically and elevated at sign-in.";
         }
 
         // SCANNING > Scan Behavior - the AftermathPostScan auto-trigger toggle
@@ -2057,7 +2103,7 @@ namespace Aftermath
             // three rows sit directly on a plain page (Bg), the retention row
             // sits inside the DangerZone card (SurfaceElevated), so it is styled
             // to match that card instead.
-            foreach (var row in new SettingRow[] { rowAppearance, rowAdmin, rowScanBehavior, rowScheduledDrift })
+            foreach (var row in new SettingRow[] { rowAppearance, rowAdmin, rowScanBehavior, rowScheduledDrift, rowLaunchAtLogon })
             {
                 row.BackColor = p.Bg;
                 row.Restyle();
@@ -2069,6 +2115,7 @@ namespace Aftermath
             toggleTheme.Invalidate();
             toggleAutoTrigger.Invalidate();
             toggleScheduledDrift.Invalidate();
+            toggleLaunchAtLogon.Invalidate();
             lblScanProfileTitle.ForeColor = p.Text;
             lblScanProfileDesc.ForeColor = p.TextDim;
             txtScanProfile.BackColor = p.SurfaceElevated;
