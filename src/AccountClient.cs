@@ -30,6 +30,21 @@ namespace Aftermath
         // (formerly its own sinvaux-website deployment) - see the api path below.
         public const string BaseUrl = "https://sinvaux-main.fly.dev";
 
+        static AccountClient()
+        {
+            // .NET Framework's default SecurityProtocol on older Windows
+            // installs is SSL3/TLS1.0 only - Fly.io's edge requires TLS1.2+,
+            // so without this the handshake fails silently and Login() surfaces
+            // it as "could not reach the website" even though the URL and the
+            // server are both fine. Cast to int rather than referencing
+            // SecurityProtocolType.Tls12 directly - that enum member doesn't
+            // exist in the .NET 4.0 reference assembly build.cmd compiles
+            // against, but the underlying value works at runtime regardless of
+            // which .NET Framework is actually installed.
+            try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; }
+            catch { /* best effort - nothing else to do on a runtime with no TLS1.2 support at all */ }
+        }
+
         public static AccountLoginResult Login(string email, string password)
         {
             return Login(BaseUrl, email, password);
