@@ -47,6 +47,10 @@ namespace Aftermath
         // contentHost rather than a second content area.
         private Panel settingsHome, pgAppearance, pgAdmin, pgScanBehavior, pgData, pgConnections, pgAbout;
         private UpgradePage pgUpgrade;
+        // Owner Workspace - only ever added to nav/contentHost when
+        // Entitlements.Current.IsOwner is true (see PopulateAftermathNav);
+        // absent entirely for every other seat, never a disabled preview.
+        private OwnerWorkspace pgOwner;
         private FindingList timelineList;
         private Sidebar nav;
         private ProgressBar bar;
@@ -139,6 +143,7 @@ namespace Aftermath
         private const string Sweep = "Sweep";
         private const string Upgrade = "Upgrade";
         private const string Timeline = "Timeline";
+        private const string OwnerPage = "Organization";
 
         // Settings workspace page keys. Same convention as the Aftermath keys
         // above: the string IS both the Sidebar item key and, via ShowPage, the
@@ -178,7 +183,8 @@ namespace Aftermath
             { Quarantine,   "🔒" },
             { Sweep,        "🛰" },
             { Upgrade,      "⭐" },
-            { Timeline,     "⏱" }
+            { Timeline,     "⏱" },
+            { OwnerPage,    "🏢" }
         };
 
         private static readonly Dictionary<string, string> Help = new Dictionary<string, string>
@@ -204,6 +210,7 @@ namespace Aftermath
             { Quarantine,    "Items you have quarantined. Restore one back to where it came from, or delete the quarantined copy permanently." },
             { Sweep,         "Push this same triage out to hosts you list below and pull the results back. Aftermath only ever touches a host you have typed into the list yourself - there is no scan-the-network button." },
             { Upgrade,       "Compare tiers and see what each one unlocks." },
+            { OwnerPage,     "Real license and Sweep history for this account - owner seat only." },
             { Timeline,      "Every finding with a known timestamp, across all categories, in one chronological order - so you can see what happened before what." },
             { SettingsHome,   "Configure how SINVAUX operates on this machine." },
             { SetAppearance,  "Choose between a dark or light colour scheme." },
@@ -515,6 +522,17 @@ namespace Aftermath
             // can always see the ladder.
             nav.AddSection("Account");
             nav.Add(Upgrade, Upgrade, Glyphs[Upgrade]);
+
+            // Owner-seat gate: absent entirely for every other seat, same
+            // "gated fully absent, never a fake disabled preview" convention
+            // HasArtifactsPages/HasCorrelationTimeline already follow above -
+            // never folded into the tier ladder since IsOwner is independent
+            // of LicenseTier.
+            if (Entitlements.Current.IsOwner)
+            {
+                nav.AddSection("Organization");
+                nav.Add(OwnerPage, OwnerPage, Glyphs[OwnerPage]);
+            }
         }
 
         // Builds the Settings item set - real capabilities only, per the audit:
@@ -688,6 +706,19 @@ namespace Aftermath
             pgUpgrade = new UpgradePage();
             pgUpgrade.Visible = false;
             contentHost.Controls.Add(pgUpgrade);
+
+            // Owner Workspace - built unconditionally like every other page
+            // (cheap Panel construction), but only ever reachable via nav when
+            // PopulateAftermathNav's IsOwner check adds its sidebar item.
+            pgOwner = new OwnerWorkspace();
+            pgOwner.Visible = false;
+            pgOwner.SettingsRequested += delegate
+            {
+                SwitchWorkspace(true);
+                nav.Select(SetScanBehavior);
+            };
+            pgOwner.UpgradeRequested += delegate { nav.Select(Upgrade); };
+            contentHost.Controls.Add(pgOwner);
 
             // Timeline page - reuses FindingList like Drift does; populated in
             // Render() from every category's timestamped findings, not just one.
@@ -1835,6 +1866,8 @@ namespace Aftermath
             sweepPage.Visible = (key == Sweep);
             pgUpgrade.Visible = (key == Upgrade);
             if (key == Upgrade) pgUpgrade.RefreshTier();
+            pgOwner.Visible = (key == OwnerPage);
+            if (key == OwnerPage) pgOwner.RefreshData();
             timelineList.Visible = (key == Timeline);
             pgDetections.Visible = (key == Detections);
             pgWarnings.Visible = (key == Warnings);
@@ -1957,6 +1990,7 @@ namespace Aftermath
             zoneRetention.Restyle();
             connCard.Restyle();
             pgUpgrade.Restyle();
+            pgOwner.Restyle();
             txtLicenseKey.BackColor = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.08 : 0.05);
             txtLicenseKey.ForeColor = p.Text;
             txtLicenseKey.BorderStyle = BorderStyle.FixedSingle;

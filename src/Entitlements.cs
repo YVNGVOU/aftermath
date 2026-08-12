@@ -14,6 +14,13 @@ namespace Aftermath
 
         public LicenseTier Tier { get; private set; }
 
+        // Real functional gate on the license's "owner" seat (see License.cs's
+        // DisplayTierLabel comment for where seat comes from) - previously
+        // cosmetic only. Independent of Tier: a seat is a per-license flag, not
+        // a rung on the Free/Plus/Pro/Max/Enterprise ladder, so this is never
+        // folded into AtLeast().
+        public bool IsOwner { get; private set; }
+
         public static Entitlements Current
         {
             get
@@ -39,6 +46,7 @@ namespace Aftermath
             var ent = new Entitlements();
             var info = LicenseStore.Load();
             ent.Tier = info == null ? LicenseTier.Free : info.Tier;
+            ent.IsOwner = info != null && string.Equals(info.Seat, "owner", StringComparison.OrdinalIgnoreCase);
             return ent;
         }
 
