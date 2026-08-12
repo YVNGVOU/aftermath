@@ -335,6 +335,13 @@ namespace Aftermath
         private readonly HashSet<int> ticked = new HashSet<int>();
         public event EventHandler CheckedChanged;
 
+        // Raised on double-click of a row - the "open this one finding" trigger the
+        // Detection Workspace hooks into. Additive: does not touch Checkable/context-
+        // menu behaviour, and fires regardless of Checkable so every FindingList in
+        // the app (Detections/Warnings/System/Activity, even Cleanup) can opt in just
+        // by subscribing.
+        public event EventHandler<Finding> ItemOpened;
+
         public string EmptyText = "Nothing to show yet. Run a triage.";
 
         public FindingList()
@@ -442,6 +449,20 @@ namespace Aftermath
                     FileMenu.Build(items[i].Path).Show(this, e.Location);
             }
             base.OnMouseUp(e);
+        }
+
+        // Double-click opens the row into the Detection Workspace. Reuses the same
+        // IndexAt row-hit-testing OnMouseMove/OnMouseDown/OnMouseUp already rely on,
+        // so it can never disagree with what is drawn under the cursor. Left button
+        // only, same convention as the checkbox toggle above.
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                int i = IndexAt(e.Y);
+                if (i >= 0 && ItemOpened != null) ItemOpened(this, items[i]);
+            }
+            base.OnMouseDoubleClick(e);
         }
 
         private Color SevColor(Sev s)

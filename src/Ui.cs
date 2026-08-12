@@ -73,6 +73,14 @@ namespace Aftermath
         private FindingList cleanupList;
         private FindingList driftList;
         private QuarantineList quarantineList;
+        // Detection Workspace: reached only by double-clicking a finding in any
+        // FindingList (Detections/Warnings/System/Activity) - not a sidebar item,
+        // just another Panel in contentHost shown/hidden via ShowPage like every
+        // other page. workspaceReturnKey remembers which page opened it so Back
+        // goes to the right place.
+        private DetectionWorkspace workspace;
+        private string workspaceReturnKey = Overview;
+        private const string WorkspacePage = "__Workspace";
         private Panel sweepPage, sweepInputs, sweepResultsHost;
         private TextBox txtSweepHosts, txtSweepUser, txtSweepPass;
         private Button btnSweep;
@@ -704,7 +712,68 @@ namespace Aftermath
             BuildSettingsAbout();
             contentHost.Controls.Add(pgAbout);
 
+            // Detection Workspace - built last so its Fill panel stacks over the
+            // page set the same way every other Fill panel above already does;
+            // pageHead is added after it below so the header stays on top of all
+            // of them, same ordering rule as everything else in this method.
+            workspace = new DetectionWorkspace();
+            workspace.Visible = false;
+            workspace.BackRequested += delegate { nav.Select(workspaceReturnKey); };
+            workspace.QuarantineRequested += OnWorkspaceQuarantine;
+            contentHost.Controls.Add(workspace);
+
+            detectionsList.ItemOpened += delegate (object s, Finding f) { OpenWorkspace(f, Detections); };
+            warningsList.ItemOpened += delegate (object s, Finding f) { OpenWorkspace(f, Warnings); };
+            systemList.ItemOpened += delegate (object s, Finding f) { OpenWorkspace(f, SystemPage); };
+            lists["History"].ItemOpened += delegate (object s, Finding f) { OpenWorkspace(f, Activity); };
+
             contentHost.Controls.Add(pageHead);
+        }
+
+        // Opens the Detection Workspace on one Finding, remembering which page to
+        // return to on Back. Uses the full current TriageResult (last) so
+        // Related/Timeline can cross-reference every finding, not just the ones
+        // already loaded into whichever list was double-clicked.
+        private void OpenWorkspace(Finding f, string fromKey)
+        {
+            workspaceReturnKey = fromKey;
+            workspace.Show(f, last);
+            ShowPage(WorkspacePage);
+            lblPageTitle.Text = "Investigate";
+            lblPageHelp.Text = "One finding, in full - evidence, recommended action, and what else happened around the same time.";
+        }
+
+        // Wired to the workspace's Quarantine button - calls the exact same
+        // QuarantineStore.Add + AfterQuarantine path OnQuarantine uses for the
+        // Cleanup page's checked items, just for a single Finding instead of a
+        // batch, so there is only ever one quarantine code path in this app.
+        private void OnWorkspaceQuarantine(object sender, Finding f)
+        {
+            if (busy) return;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Quarantine this item?");
+            sb.AppendLine();
+            sb.AppendLine("   " + f.Path);
+            sb.AppendLine();
+            sb.AppendLine("Quarantined items are moved aside, not destroyed - restore them any time from the Quarantine page.");
+
+            if (MessageBox.Show(this, sb.ToString(), "Confirm quarantine",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+            busy = true;
+            bar.Style = ProgressBarStyle.Marquee;
+            bar.Visible = true;
+
+            var t = new Thread(delegate ()
+            {
+                SetStatus("Quarantining " + f.Path);
+                var o = QuarantineStore.Add(f.Path, f.Title);
+                string report = (o.Success ? "OK     " : "FAILED ") + f.Path + Environment.NewLine + "        " + o.Message;
+                BeginInvoke(new Action<string>(AfterQuarantine), report);
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         // Sweep page: target hosts (typed only, never discovered), credentials
@@ -1780,6 +1849,7 @@ namespace Aftermath
             // underneath the new cross-cutting/tabbed page.
             lists["Artifacts"].Visible = (key == Cats[3]);
             lists["History"].Visible = (key == Activity);
+            workspace.Visible = (key == WorkspacePage);
 
             // Settings pages - same pattern, just a second set of keys. Keys never
             // collide across the two workspaces, so no extra "which workspace" gate
@@ -1939,6 +2009,8 @@ namespace Aftermath
 
             sweepList.BackColor = p.Bg;
             sweepFindingsList.BackColor = p.Bg;
+
+            workspace.Restyle();
 
             if (last != null) UpdateOverview();
             else
