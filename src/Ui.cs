@@ -158,12 +158,12 @@ namespace Aftermath
         private const string SetAbout = "About";
 
         // Exact count of sequential steps OnScan's background thread runs through -
-        // the 9 named scanner/deep calls plus the inline baseline-compare step.
+        // the 10 named scanner/deep calls plus the inline baseline-compare step.
         // Drives the determinate progress bar; never rounded or estimated.
-        private const int ScanStepCount = 10;
+        private const int ScanStepCount = 11;
 
         private static readonly string[] Cats = new string[]
-            { "Detections", "Exposure", "History", "Artifacts", "Startup", "Persistence", "Network", "System" };
+            { "Detections", "Exposure", "History", "Artifacts", "Startup", "Persistence", "Network", "System", "External AV" };
 
         private static readonly Dictionary<string, string> Glyphs = new Dictionary<string, string>
         {
@@ -205,6 +205,7 @@ namespace Aftermath
             { "Persistence", "Hiding places malware uses to survive a reboot: services, scheduled tasks, WMI event subscriptions." },
             { "Network",     "What is talking to the internet right now, and which program owns each connection." },
             { "System",      "Startup, persistence, network, and settings malware likes to change - proxy redirection, blocked updates, hidden antivirus exclusions - in one tabbed page." },
+            { "External AV", "Third-party antivirus products registered with Windows Security Center, and their own recent event log entries. Windows Defender is covered separately." },
             { Drift,         "What changed since your last scan: new startup entries, persistence, listening ports, and settings tracked by Baseline." },
             { Cleanup,       "Tick what you want gone, then quarantine it. Quarantined items are moved aside, not destroyed - you can restore them from the Quarantine page. Protected system locations are refused no matter what." },
             { Quarantine,    "Items you have quarantined. Restore one back to where it came from, or delete the quarantined copy permanently." },
@@ -2118,6 +2119,7 @@ namespace Aftermath
                 try
                 {
                     Scanner.Defender(r, SetStatus); ScanStep();
+                    ExternalAv.ThirdPartyAv(r, SetStatus); ScanStep();
                     Scanner.SystemChecks(r, SetStatus); ScanStep();
                     Deep.Sabotage(r, SetStatus); ScanStep();
                     Scanner.Startup(r, SetStatus); ScanStep();
@@ -2177,7 +2179,7 @@ namespace Aftermath
             // has no separate column for it, so this is the least invasive way to
             // keep that context visible once findings are pooled from 7 categories
             // into one list.
-            var crossCutCats = new HashSet<string> { Cats[0], Cats[1], Cats[3], Cats[4], Cats[5], Cats[6], Cats[7] };
+            var crossCutCats = new HashSet<string> { Cats[0], Cats[1], Cats[3], Cats[4], Cats[5], Cats[6], Cats[7], Cats[8] };
             allDetections = r.Findings.Where(x => x.Severity == Sev.Bad && crossCutCats.Contains(x.Category))
                                        .Select(TagSource).ToList();
             allWarnings = r.Findings.Where(x => x.Severity == Sev.Warn && crossCutCats.Contains(x.Category))
