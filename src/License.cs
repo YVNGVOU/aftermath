@@ -126,6 +126,20 @@ namespace Aftermath
             }
         }
 
+        // Display-only label for the tier badge/description. "owner" is a
+        // cosmetic seat value some Enterprise keys carry (see the website's
+        // license.js issueLicenseKey seat param) - it doesn't add a real
+        // tier, doesn't change anything Entitlements.cs checks, and doesn't
+        // touch what LicenseTier.Enterprise already unlocks. It only swaps
+        // what gets printed next to it.
+        public static string DisplayTierLabel()
+        {
+            var info = Load();
+            if (info == null) return "FREE";
+            if (string.Equals(info.Seat, "owner", StringComparison.OrdinalIgnoreCase)) return "OWNER";
+            return info.Tier.ToString().ToUpperInvariant();
+        }
+
         public static LicenseInfo Load()
         {
             lock (Lock)

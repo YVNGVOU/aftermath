@@ -330,7 +330,7 @@ namespace Aftermath
 
             planPill = new PlanPill();
             planPill.Location = new Point(388, 21);
-            planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
+            planPill.Label = LicenseStore.DisplayTierLabel();
             header.Controls.Add(planPill);
 
             btnScan = Flat("Run Triage", 140, 34);
@@ -1346,7 +1346,7 @@ namespace Aftermath
             connCard.ServiceName = "License";
             connCard.Connected = (current != null);
             connCard.Description = current != null
-                ? "Licensed - " + current.Tier + " tier, expires " + current.ExpiresUtc.ToString("yyyy-MM-dd")
+                ? "Licensed - " + LicenseStore.DisplayTierLabel() + ", expires " + current.ExpiresUtc.ToString("yyyy-MM-dd")
                 : "No license activated yet. SINVAUX runs at the Free tier until one is added.";
             connCard.Location = new Point(22, 40);
             pgConnections.Controls.Add(connCard);
@@ -1437,12 +1437,12 @@ namespace Aftermath
             Entitlements.Reload();
             LicenseInfo info = LicenseStore.Load();
             statusLabel.ForeColor = Theme.P.OkColor;
-            statusLabel.Text = "Activated - " + (info != null ? info.Tier.ToString() : "") + " tier.";
+            statusLabel.Text = "Activated - " + LicenseStore.DisplayTierLabel() + ".";
             connCard.Connected = true;
             connCard.Description = info != null
-                ? "Licensed - " + info.Tier + " tier, expires " + info.ExpiresUtc.ToString("yyyy-MM-dd")
+                ? "Licensed - " + LicenseStore.DisplayTierLabel() + ", expires " + info.ExpiresUtc.ToString("yyyy-MM-dd")
                 : connCard.Description;
-            planPill.Label = Entitlements.Current.Tier.ToString().ToUpperInvariant();
+            planPill.Label = LicenseStore.DisplayTierLabel();
             planPill.Invalidate();
             RefreshScheduledDriftToggle();
             RefreshScanProfileSection();
