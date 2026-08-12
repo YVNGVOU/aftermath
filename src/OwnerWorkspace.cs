@@ -56,6 +56,16 @@ namespace Aftermath
         private readonly Label billExpiry = new Label();
         private Button btnBillUpgrade;
 
+        // ---- Organization tab (SIMULATED DATA - see SimulatedOrgData.cs) ----
+        private readonly Panel tabOrg = new Panel();
+        private readonly Panel orgBanner = new Panel();
+        private readonly Label orgBannerLabel = new Label();
+        private readonly OwnerSimUserList orgUserList = new OwnerSimUserList();
+        private readonly Panel orgRolesPanel = new Panel();
+        private readonly Panel orgInvitesPanel = new Panel();
+        private readonly List<Button> orgInviteButtons = new List<Button>();
+        private readonly Panel orgScroll = new Panel();
+
         // Raised when Policies' "Go to Scan Behavior" is clicked - Ui.cs owns
         // the actual workspace/nav switch, same delegation pattern as
         // DetectionWorkspace's BackRequested/QuarantineRequested.
@@ -73,6 +83,7 @@ namespace Aftermath
             tabs.AddTab("Audit", "Audit");
             tabs.AddTab("Policies", "Policies");
             tabs.AddTab("Billing", "Billing");
+            tabs.AddTab("Organization", "Organization");
             tabs.TabSelected += delegate (object s, string key) { ShowTab(key); };
             Controls.Add(tabs);
 
@@ -84,8 +95,9 @@ namespace Aftermath
             BuildAuditTab();
             BuildPoliciesTab();
             BuildBillingTab();
+            BuildOrganizationTab();
 
-            foreach (var t in new Panel[] { tabOverview, tabDevices, tabAudit, tabPolicies, tabBilling })
+            foreach (var t in new Panel[] { tabOverview, tabDevices, tabAudit, tabPolicies, tabBilling, tabOrg })
             {
                 t.Dock = DockStyle.Fill;
                 t.Visible = false;
@@ -112,6 +124,7 @@ namespace Aftermath
             tabAudit.Visible = (key == "Audit");
             tabPolicies.Visible = (key == "Policies");
             tabBilling.Visible = (key == "Billing");
+            tabOrg.Visible = (key == "Organization");
         }
 
         // Populates every tab from the live license + audit log. Called by
@@ -313,6 +326,120 @@ namespace Aftermath
             tabBilling.Controls.Add(btnBillUpgrade);
         }
 
+        // Organization tab: Users/Roles/Invitations, ALL simulated data from
+        // SimulatedOrgData.cs. This is the one deliberate exception to this
+        // page's "never fabricate" rule (see that file's header comment) -
+        // the SIMULATED banner below must stay visible under every
+        // sub-section, painted with Theme.P.Warn rather than the normal
+        // Accent color so it reads as categorically different from the real
+        // Overview/Devices/Audit/Policies/Billing tabs.
+        private void BuildOrganizationTab()
+        {
+            orgBanner.Height = 44;
+            orgBanner.Dock = DockStyle.Top;
+            orgBannerLabel.Text = "SIMULATED DATA — for product demonstration only, not connected to real accounts.";
+            orgBannerLabel.Font = Brand.F(9f, FontStyle.Bold);
+            orgBannerLabel.AutoSize = false;
+            orgBannerLabel.Dock = DockStyle.Fill;
+            orgBannerLabel.TextAlign = ContentAlignment.MiddleLeft;
+            orgBannerLabel.Padding = new Padding(16, 0, 16, 0);
+            orgBanner.Controls.Add(orgBannerLabel);
+            tabOrg.Controls.Add(orgBanner);
+
+            var scroll = orgScroll;
+            scroll.Dock = DockStyle.Fill;
+            scroll.AutoScroll = true;
+            tabOrg.Controls.Add(scroll);
+            scroll.BringToFront();
+            orgBanner.BringToFront();
+
+            int y = 16;
+
+            var usersHeader = Header("USERS (SIMULATED ROSTER)");
+            usersHeader.Location = new Point(22, y);
+            scroll.Controls.Add(usersHeader);
+            y += 26;
+
+            orgUserList.Location = new Point(20, y);
+            orgUserList.Width = 700;
+            orgUserList.Height = SimulatedOrgData.Users().Count * 60 + 8;
+            orgUserList.SetItems(SimulatedOrgData.Users());
+            scroll.Controls.Add(orgUserList);
+            y += orgUserList.Height + 24;
+
+            var rolesHeader = Header("ROLES (PLANNED ROLE MODEL - NOT ENFORCED TODAY)");
+            rolesHeader.Location = new Point(22, y);
+            scroll.Controls.Add(rolesHeader);
+            y += 26;
+
+            orgRolesPanel.Location = new Point(20, y);
+            orgRolesPanel.Width = 700;
+            int ry = 4;
+            foreach (var role in SimulatedOrgData.Roles())
+            {
+                var l = new Label();
+                l.Text = role.Role + " — " + role.Description;
+                l.AutoSize = false;
+                l.Width = 660;
+                l.Height = 24;
+                l.Location = new Point(4, ry);
+                l.Tag = "orgdim";
+                orgRolesPanel.Controls.Add(l);
+                ry += 24;
+            }
+            orgRolesPanel.Height = ry + 4;
+            scroll.Controls.Add(orgRolesPanel);
+            y += orgRolesPanel.Height + 24;
+
+            var invitesHeader = Header("PENDING INVITATIONS (SIMULATED)");
+            invitesHeader.Location = new Point(22, y);
+            scroll.Controls.Add(invitesHeader);
+            y += 26;
+
+            orgInvitesPanel.Location = new Point(20, y);
+            orgInvitesPanel.Width = 700;
+            int iy = 4;
+            orgInviteButtons.Clear();
+            foreach (var inv in SimulatedOrgData.Invitations())
+            {
+                var l = new Label();
+                l.Text = inv.Email + "   -   invited by " + inv.InvitedBy + ", " + inv.InvitedWhen;
+                l.AutoSize = false;
+                l.Width = 440;
+                l.Height = 28;
+                l.Location = new Point(4, iy);
+                l.Tag = "orgdim";
+                orgInvitesPanel.Controls.Add(l);
+
+                string email = inv.Email;
+                var resend = Flat("Resend", 90, 26);
+                resend.Location = new Point(452, iy - 1);
+                resend.Click += delegate
+                {
+                    MessageBox.Show(
+                        "This is a demonstration - no real invitation exists to resend.",
+                        "Simulated action", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                };
+                orgInvitesPanel.Controls.Add(resend);
+                orgInviteButtons.Add(resend);
+
+                var revoke = Flat("Revoke", 90, 26);
+                revoke.Location = new Point(552, iy - 1);
+                revoke.Click += delegate
+                {
+                    MessageBox.Show(
+                        "This is a demonstration - no real invitation exists to revoke.",
+                        "Simulated action", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                };
+                orgInvitesPanel.Controls.Add(revoke);
+                orgInviteButtons.Add(revoke);
+
+                iy += 34;
+            }
+            orgInvitesPanel.Height = iy + 4;
+            scroll.Controls.Add(orgInvitesPanel);
+        }
+
         private Button Flat(string text, int w, int h)
         {
             var b = new Button();
@@ -339,8 +466,38 @@ namespace Aftermath
             var p = Theme.P;
             BackColor = p.Bg;
             body.BackColor = p.Bg;
-            foreach (var t in new Panel[] { tabOverview, tabDevices, tabAudit, tabPolicies, tabBilling })
+            foreach (var t in new Panel[] { tabOverview, tabDevices, tabAudit, tabPolicies, tabBilling, tabOrg })
                 t.BackColor = p.Bg;
+
+            // SIMULATED banner: Warn-colored border/accent, deliberately not
+            // the app's normal Accent color, so it reads as categorically
+            // different from every other (real-data) banner in this app.
+            orgBanner.BackColor = Draw.Mix(p.Bg, p.Warn, Theme.IsDark ? 0.22 : 0.16);
+            orgBannerLabel.ForeColor = p.Text;
+            orgBanner.Padding = new Padding(0, 0, 0, 3);
+            orgBanner.BackColor = Draw.Mix(p.Bg, p.Warn, Theme.IsDark ? 0.22 : 0.16);
+
+            orgScroll.BackColor = p.Bg;
+            orgRolesPanel.BackColor = p.Bg;
+            orgInvitesPanel.BackColor = p.Bg;
+            foreach (Control c in orgScroll.Controls) if (c is Label) c.ForeColor = p.Text;
+            foreach (Control c in orgRolesPanel.Controls) if (c is Label) c.ForeColor = p.TextDim;
+            foreach (Control c in orgInvitesPanel.Controls) if (c is Label) c.ForeColor = p.TextDim;
+
+            Color orgSoft = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.16 : 0.10);
+            Color orgSoftBorder = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.34 : 0.24);
+            Color orgSoftHover = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.24 : 0.17);
+            foreach (var b in orgInviteButtons)
+            {
+                b.BackColor = orgSoft;
+                b.ForeColor = p.Text;
+                b.FlatAppearance.BorderSize = 1;
+                b.FlatAppearance.BorderColor = orgSoftBorder;
+                b.FlatAppearance.MouseOverBackColor = orgSoftHover;
+            }
+
+            orgUserList.BackColor = p.Bg;
+            orgUserList.Invalidate();
 
             foreach (var l in new Label[] { ovTier, billTier })
                 l.ForeColor = p.Text;
@@ -459,6 +616,84 @@ namespace Aftermath
 
                     string meta = "Last seen: " + h.LastSeen.ToString("yyyy-MM-dd HH:mm:ss") +
                         "      Last status: " + h.LastStatus;
+                    var metaRect = new Rectangle(x, card.Y + 30, Math.Max(60, card.Width - 32), 22);
+                    TextRenderer.DrawText(g, meta, new Font("Segoe UI", 8.5f), metaRect, p.TextDim,
+                        TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+                }
+            }
+        }
+
+        // One row per simulated user in SimulatedOrgData.Users(). Visually
+        // identical card idiom to OwnerHostList (RoundRect body, left-edge
+        // stripe, Mix-derived hover) so the fake data still fits the app's
+        // design system - only the data source differs, never the paint.
+        private class OwnerSimUserList : Control
+        {
+            private List<SimUser> items = new List<SimUser>();
+            private int hover = -1;
+            private const int RowH = 60;
+
+            public OwnerSimUserList()
+            {
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
+                         ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            }
+
+            public void SetItems(IEnumerable<SimUser> items2)
+            {
+                items = new List<SimUser>(items2);
+                Invalidate();
+            }
+
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                int i = IndexAt(e.Y);
+                if (i != hover) { hover = i; Invalidate(); }
+                base.OnMouseMove(e);
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                if (hover != -1) { hover = -1; Invalidate(); }
+                base.OnMouseLeave(e);
+            }
+
+            private int IndexAt(int y)
+            {
+                int i = y / RowH;
+                return (i >= 0 && i < items.Count) ? i : -1;
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var p = Theme.P;
+                var g = e.Graphics;
+                g.Clear(p.Bg);
+
+                int w = ClientSize.Width;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    var u = items[i];
+                    int y = i * RowH;
+                    if (y > ClientSize.Height) break;
+                    var card = new Rectangle(10, y + 4, w - 20, RowH - 8);
+
+                    Color fg = (u.Status == "Invited") ? p.Warn : p.Accent;
+                    Color bg = p.SurfaceElevated;
+                    if (i == hover) bg = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.11 : 0.07);
+
+                    Draw.RoundRect(g, card, 8, bg);
+                    Draw.RoundRectOutline(g, card, 8, p.BorderStandard);
+                    Draw.RoundRect(g, new Rectangle(card.X, card.Y + 6, 3, card.Height - 12), 2, fg);
+
+                    int x = card.X + 16;
+                    string title = u.Name + "   -   " + u.Role;
+                    var titleRect = new Rectangle(x, card.Y + 8, Math.Max(60, card.Width - 32), 20);
+                    TextRenderer.DrawText(g, title, new Font("Segoe UI", 9.5f, FontStyle.Bold), titleRect, p.Text,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+                    string meta = "Status: " + u.Status + "      Last activity: " + u.LastActivity;
                     var metaRect = new Rectangle(x, card.Y + 30, Math.Max(60, card.Width - 32), 22);
                     TextRenderer.DrawText(g, meta, new Font("Segoe UI", 8.5f), metaRect, p.TextDim,
                         TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
