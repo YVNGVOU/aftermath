@@ -1625,4 +1625,659 @@ namespace Aftermath
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
+
+    // A caller-supplied group of filter checkboxes shown together under one
+    // heading in the FilterBar popover, e.g. Label="Severity", Options=["Serious","Check","OK"].
+    public class FilterGroup
+    {
+        public string Label;
+        public List<string> Options;
+    }
+
+    // Compact toolbar strip that sits above a list/table: a Filter button that
+    // opens a borderless popover of grouped checkboxes (same owner-drawn
+    // dropdown idiom as ThemedMenuRenderer's ContextMenuStrip, but custom-drawn
+    // since checkboxes-by-group don't fit a ToolStripMenuItem), removable chips
+    // for each active filter (same tinted-pill language as FindingList's
+    // severity chip), a "Clear all" link, and a custom-painted sort dropdown -
+    // a plain ComboBox would look system-themed, same reason this app bans
+    // TabControl/ListView.
+    public class FilterBar : Control
+    {
+        private List<FilterGroup> groups = new List<FilterGroup>();
+        private List<string> sortOptions = new List<string>();
+        private readonly HashSet<string> activeFilters = new HashSet<string>();
+        private string activeSort;
+
+        public event EventHandler FiltersChanged;
+
+        private const int BtnH = 30;
+        private const int ChipH = 26;
+        private const int Gap = 8;
+
+        private Rectangle filterBtnRect;
+        private Rectangle clearRect;
+        private Rectangle sortRect;
+        private bool filterBtnHover;
+        private bool clearHover;
+        private bool sortHover;
+        private int hoverChip = -1;         // index into activeFilters ordering, for chip-body hover
+        private int hoverChipX = -1;        // index for the little "x" close glyph specifically
+
+        private FilterPopover openPopover;
+        private SortPopover openSortPopover;
+
+        // Cached per-paint layout of chips, rebuilt every OnPaint so hit-testing
+        // in OnMouseMove/OnMouseDown always matches what was last drawn.
+        private readonly List<Rectangle> chipRects = new List<Rectangle>();
+        private readonly List<Rectangle> chipCloseRects = new List<Rectangle>();
+        private readonly List<string> chipKeys = new List<string>();
+
+        public FilterBar()
+        {
+            Height = 44;
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        }
+
+        public void SetFilterGroups(List<FilterGroup> g)
+        {
+            groups = g ?? new List<FilterGroup>();
+            Invalidate();
+        }
+
+        public void SetSortOptions(List<string> options)
+        {
+            sortOptions = options ?? new List<string>();
+            if (activeSort == null && sortOptions.Count > 0) activeSort = sortOptions[0];
+            Invalidate();
+        }
+
+        public HashSet<string> ActiveFilters { get { return activeFilters; } }
+
+        public string ActiveSort
+        {
+            get { return activeSort; }
+            set { activeSort = value; Invalidate(); }
+        }
+
+        private void RaiseChanged()
+        {
+            Invalidate();
+            if (FiltersChanged != null) FiltersChanged(this, EventArgs.Empty);
+        }
+
+        private static string KeyFor(string groupLabel, string option)
+        {
+            return groupLabel + ":" + option;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            bool fb = filterBtnRect.Contains(e.Location);
+            bool cb = clearRect.Contains(e.Location);
+            bool sb2 = sortRect.Contains(e.Location);
+            int hc = -1, hcx = -1;
+            for (int i = 0; i < chipRects.Count; i++)
+            {
+                if (chipCloseRects[i].Contains(e.Location)) { hc = i; hcx = i; break; }
+                if (chipRects[i].Contains(e.Location)) { hc = i; break; }
+            }
+            if (fb != filterBtnHover || cb != clearHover || sb2 != sortHover || hc != hoverChip || hcx != hoverChipX)
+            {
+                filterBtnHover = fb; clearHover = cb; sortHover = sb2; hoverChip = hc; hoverChipX = hcx;
+                Invalidate();
+            }
+            Cursor = (fb || cb || sb2 || hc >= 0) ? Cursors.Hand : Cursors.Default;
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            filterBtnHover = clearHover = sortHover = false;
+            hoverChip = hoverChipX = -1;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) { base.OnMouseDown(e); return; }
+
+            if (filterBtnRect.Contains(e.Location))
+            {
+                CloseSortPopover();
+                ToggleFilterPopover();
+            }
+            else if (clearRect.Contains(e.Location) && activeFilters.Count > 0)
+            {
+                activeFilters.Clear();
+                RaiseChanged();
+            }
+            else if (sortRect.Contains(e.Location))
+            {
+                CloseFilterPopover();
+                ToggleSortPopover();
+            }
+            else
+            {
+                for (int i = 0; i < chipRects.Count; i++)
+                {
+                    if (chipCloseRects[i].Contains(e.Location))
+                    {
+                        activeFilters.Remove(chipKeys[i]);
+                        RaiseChanged();
+                        break;
+                    }
+                }
+            }
+            base.OnMouseDown(e);
+        }
+
+        private void ToggleFilterPopover()
+        {
+            if (openPopover != null) { CloseFilterPopover(); return; }
+            var loc = PointToScreen(new Point(filterBtnRect.Left, filterBtnRect.Bottom + 4));
+            openPopover = new FilterPopover(groups, activeFilters);
+            openPopover.OptionToggled += delegate (object s, string key)
+            {
+                if (activeFilters.Contains(key)) activeFilters.Remove(key); else activeFilters.Add(key);
+                RaiseChanged();
+                openPopover.Refresh();
+            };
+            openPopover.Deactivate += delegate { CloseFilterPopover(); };
+            openPopover.Location = loc;
+            openPopover.Show(this);
+        }
+
+        private void CloseFilterPopover()
+        {
+            if (openPopover == null) return;
+            var p = openPopover;
+            openPopover = null;
+            p.Close();
+        }
+
+        private void ToggleSortPopover()
+        {
+            if (openSortPopover != null) { CloseSortPopover(); return; }
+            var loc = PointToScreen(new Point(sortRect.Left, sortRect.Bottom + 4));
+            openSortPopover = new SortPopover(sortOptions, activeSort);
+            openSortPopover.OptionPicked += delegate (object s, string opt)
+            {
+                activeSort = opt;
+                RaiseChanged();
+                CloseSortPopover();
+            };
+            openSortPopover.Deactivate += delegate { CloseSortPopover(); };
+            openSortPopover.Location = loc;
+            openSortPopover.Show(this);
+        }
+
+        private void CloseSortPopover()
+        {
+            if (openSortPopover == null) return;
+            var p = openSortPopover;
+            openSortPopover = null;
+            p.Close();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var p = Theme.P;
+            var g = e.Graphics;
+            g.Clear(p.Bg);
+
+            chipRects.Clear();
+            chipCloseRects.Clear();
+            chipKeys.Clear();
+
+            int x = 0;
+            int cy = (Height - BtnH) / 2;
+
+            // Filter button.
+            string filterLabel = activeFilters.Count > 0 ? "Filter (" + activeFilters.Count + ")" : "Filter";
+            int filterW = TextRenderer.MeasureText(filterLabel, new Font("Segoe UI", 8.5f, FontStyle.Bold)).Width + 34;
+            filterBtnRect = new Rectangle(x, cy, filterW, BtnH);
+            Color filterFill = (filterBtnHover || openPopover != null)
+                ? Draw.Mix(p.Bg, p.Accent, Theme.IsDark ? 0.30 : 0.18)
+                : Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.10 : 0.06);
+            Draw.RoundRect(g, filterBtnRect, 7, filterFill);
+            Draw.RoundRectOutline(g, filterBtnRect, 7, p.BorderStandard);
+            TextRenderer.DrawText(g, filterLabel, new Font("Segoe UI", 8.5f, FontStyle.Bold), filterBtnRect,
+                activeFilters.Count > 0 ? p.Accent : p.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            x += filterW + Gap;
+
+            // Chips.
+            foreach (var key in activeFilters)
+            {
+                string label = ChipLabel(key);
+                int textW = TextRenderer.MeasureText(label, new Font("Segoe UI", 8f, FontStyle.Bold)).Width;
+                int chipW = textW + 34;
+                var chip = new Rectangle(x, cy + (BtnH - ChipH) / 2, chipW, ChipH);
+
+                int idx = chipRects.Count;
+                bool hov = hoverChip == idx;
+                Color chipFill = Color.FromArgb(hov ? (Theme.IsDark ? 66 : 46) : (Theme.IsDark ? 52 : 34), p.Accent);
+                Draw.RoundRect(g, chip, ChipH / 2, chipFill);
+
+                var textRect = new Rectangle(chip.X + 12, chip.Y, chip.Width - 32, chip.Height);
+                TextRenderer.DrawText(g, label, new Font("Segoe UI", 8f, FontStyle.Bold), textRect, p.Accent,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+                var closeRect = new Rectangle(chip.Right - 22, chip.Y + (chip.Height - 16) / 2, 16, 16);
+                bool closeHov = hoverChipX == idx;
+                if (closeHov) Draw.RoundRect(g, closeRect, 8, Color.FromArgb(Theme.IsDark ? 90 : 60, p.Accent));
+                TextRenderer.DrawText(g, "x", new Font("Segoe UI", 8f, FontStyle.Bold), closeRect, p.Accent,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+
+                chipRects.Add(chip);
+                chipCloseRects.Add(closeRect);
+                chipKeys.Add(key);
+
+                x += chipW + Gap;
+            }
+
+            // Clear all - only when something is active.
+            if (activeFilters.Count > 0)
+            {
+                string clearLabel = "Clear all";
+                int clearW = TextRenderer.MeasureText(clearLabel, new Font("Segoe UI", 8.5f)).Width + 8;
+                clearRect = new Rectangle(x, 0, clearW, Height);
+                TextRenderer.DrawText(g, clearLabel, new Font("Segoe UI", 8.5f, clearHover ? FontStyle.Underline : FontStyle.Regular),
+                    clearRect, p.TextDim, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                x += clearW + Gap;
+            }
+            else
+            {
+                clearRect = Rectangle.Empty;
+            }
+
+            // Sort dropdown, right-aligned.
+            string sortLabel = "Sort: " + (activeSort ?? "-");
+            int sortW = TextRenderer.MeasureText(sortLabel, new Font("Segoe UI", 8.5f)).Width + 40;
+            sortRect = new Rectangle(Width - sortW, cy, sortW, BtnH);
+            if (sortRect.Left < x) sortRect = new Rectangle(x, cy, sortW, BtnH);
+            Color sortFill = (sortHover || openSortPopover != null)
+                ? Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.14 : 0.09)
+                : p.SurfaceElevated;
+            Draw.RoundRect(g, sortRect, 7, sortFill);
+            Draw.RoundRectOutline(g, sortRect, 7, p.BorderStandard);
+            var sortTextRect = new Rectangle(sortRect.X + 12, sortRect.Y, sortRect.Width - 26, sortRect.Height);
+            TextRenderer.DrawText(g, sortLabel, new Font("Segoe UI", 8.5f), sortTextRect, p.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            var caretRect = new Rectangle(sortRect.Right - 20, sortRect.Y, 16, sortRect.Height);
+            TextRenderer.DrawText(g, "▾", new Font("Segoe UI", 8f), caretRect, p.TextDim,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        // "GroupLabel:Option" -> "Option" for chip display; falls back to the
+        // raw key if it doesn't contain the expected separator.
+        private static string ChipLabel(string key)
+        {
+            int i = key.IndexOf(':');
+            return i >= 0 && i < key.Length - 1 ? key.Substring(i + 1) : key;
+        }
+
+        // Borderless owner-drawn popover for grouped filter checkboxes - same
+        // "float below the button, close on deactivate" pattern as a
+        // ContextMenuStrip, but hand-painted since ToolStripMenuItem cannot host
+        // per-group checkbox lists.
+        private class FilterPopover : Form
+        {
+            private readonly List<FilterGroup> groups;
+            private readonly HashSet<string> active;
+            private readonly List<Rectangle> rowRects = new List<Rectangle>();
+            private readonly List<string> rowKeys = new List<string>();
+            private int hoverRow = -1;
+            public event EventHandler<string> OptionToggled;
+
+            public FilterPopover(List<FilterGroup> groups, HashSet<string> active)
+            {
+                this.groups = groups;
+                this.active = active;
+
+                FormBorderStyle = FormBorderStyle.None;
+                StartPosition = FormStartPosition.Manual;
+                ShowInTaskbar = false;
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
+                         ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+
+                int rowH = 26;
+                int headerH = 22;
+                int height = 12;
+                int width = 220;
+                foreach (var grp in groups)
+                {
+                    height += headerH;
+                    height += (grp.Options != null ? grp.Options.Count : 0) * rowH;
+                }
+                if (groups.Count == 0) height += 26;
+                Size = new Size(width, Math.Max(40, height));
+
+                MouseMove += FilterPopover_MouseMove;
+                MouseLeave += delegate { hoverRow = -1; Invalidate(); };
+                MouseDown += FilterPopover_MouseDown;
+                Paint += FilterPopover_Paint;
+            }
+
+            private void FilterPopover_MouseMove(object sender, MouseEventArgs e)
+            {
+                int idx = -1;
+                for (int i = 0; i < rowRects.Count; i++)
+                    if (rowRects[i].Contains(e.Location)) { idx = i; break; }
+                if (idx != hoverRow) { hoverRow = idx; Invalidate(); }
+                Cursor = idx >= 0 ? Cursors.Hand : Cursors.Default;
+            }
+
+            private void FilterPopover_MouseDown(object sender, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left) return;
+                for (int i = 0; i < rowRects.Count; i++)
+                {
+                    if (rowRects[i].Contains(e.Location))
+                    {
+                        if (OptionToggled != null) OptionToggled(this, rowKeys[i]);
+                        return;
+                    }
+                }
+            }
+
+            private void FilterPopover_Paint(object sender, PaintEventArgs e)
+            {
+                var p = Theme.P;
+                var g = e.Graphics;
+                g.Clear(p.Panel);
+
+                rowRects.Clear();
+                rowKeys.Clear();
+
+                int y = 6;
+                int rowH = 26;
+                int headerH = 22;
+
+                if (groups.Count == 0)
+                {
+                    TextRenderer.DrawText(g, "No filters available", new Font("Segoe UI", 8.5f),
+                        new Rectangle(10, y, Width - 20, 26), p.TextDim, TextFormatFlags.VerticalCenter);
+                }
+
+                foreach (var grp in groups)
+                {
+                    var headerRect = new Rectangle(10, y, Width - 20, headerH);
+                    TextRenderer.DrawText(g, (grp.Label ?? "").ToUpperInvariant(), new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                        headerRect, p.TextDim, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                    y += headerH;
+
+                    if (grp.Options != null)
+                    {
+                        foreach (var opt in grp.Options)
+                        {
+                            string key = KeyFor(grp.Label, opt);
+                            var row = new Rectangle(4, y, Width - 8, rowH);
+                            int idx = rowRects.Count;
+                            if (idx == hoverRow)
+                                Draw.RoundRect(g, row, 6, Draw.Mix(p.Panel, p.Text, Theme.IsDark ? 0.10 : 0.06));
+
+                            var box = new Rectangle(row.X + 10, row.Y + (rowH - 16) / 2, 16, 16);
+                            bool on = active.Contains(key);
+                            Draw.RoundRect(g, box, 4, on ? p.Accent : Draw.Mix(p.Panel, p.Text, 0.18));
+                            if (on)
+                                TextRenderer.DrawText(g, "✓", new Font("Segoe UI", 8f, FontStyle.Bold), box,
+                                    Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+
+                            var textRect = new Rectangle(box.Right + 10, row.Y, row.Width - (box.Right + 10) - 8, rowH);
+                            TextRenderer.DrawText(g, opt, new Font("Segoe UI", 8.5f), textRect, p.Text,
+                                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+                            rowRects.Add(row);
+                            rowKeys.Add(key);
+                            y += rowH;
+                        }
+                    }
+                }
+
+                using (var pen = new Pen(p.BorderStrong))
+                    g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+            }
+
+            protected override bool ShowWithoutActivation { get { return false; } }
+        }
+
+        // Borderless owner-drawn popover of plain sort option rows, same visual
+        // family as FilterPopover but a flat single-select list (no checkboxes).
+        private class SortPopover : Form
+        {
+            private readonly List<string> options;
+            private readonly string current;
+            private readonly List<Rectangle> rowRects = new List<Rectangle>();
+            private int hoverRow = -1;
+            public event EventHandler<string> OptionPicked;
+
+            public SortPopover(List<string> options, string current)
+            {
+                this.options = options;
+                this.current = current;
+
+                FormBorderStyle = FormBorderStyle.None;
+                StartPosition = FormStartPosition.Manual;
+                ShowInTaskbar = false;
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
+                         ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+
+                int rowH = 28;
+                Size = new Size(180, Math.Max(30, options.Count * rowH + 8));
+
+                MouseMove += delegate (object s, MouseEventArgs e)
+                {
+                    int idx = -1;
+                    for (int i = 0; i < rowRects.Count; i++)
+                        if (rowRects[i].Contains(e.Location)) { idx = i; break; }
+                    if (idx != hoverRow) { hoverRow = idx; Invalidate(); }
+                    Cursor = idx >= 0 ? Cursors.Hand : Cursors.Default;
+                };
+                MouseLeave += delegate { hoverRow = -1; Invalidate(); };
+                MouseDown += delegate (object s, MouseEventArgs e)
+                {
+                    if (e.Button != MouseButtons.Left) return;
+                    for (int i = 0; i < rowRects.Count; i++)
+                        if (rowRects[i].Contains(e.Location))
+                        {
+                            if (OptionPicked != null) OptionPicked(this, options[i]);
+                            return;
+                        }
+                };
+                Paint += SortPopover_Paint;
+            }
+
+            private void SortPopover_Paint(object sender, PaintEventArgs e)
+            {
+                var p = Theme.P;
+                var g = e.Graphics;
+                g.Clear(p.Panel);
+
+                rowRects.Clear();
+                int y = 4;
+                int rowH = 28;
+                for (int i = 0; i < options.Count; i++)
+                {
+                    var row = new Rectangle(4, y, Width - 8, rowH);
+                    bool isCurrent = options[i] == current;
+                    if (i == hoverRow)
+                        Draw.RoundRect(g, row, 6, Draw.Mix(p.Panel, p.Text, Theme.IsDark ? 0.10 : 0.06));
+                    else if (isCurrent)
+                        Draw.RoundRect(g, row, 6, Draw.Mix(p.Panel, p.Accent, Theme.IsDark ? 0.20 : 0.12));
+
+                    var textRect = new Rectangle(row.X + 12, row.Y, row.Width - 24, rowH);
+                    TextRenderer.DrawText(g, options[i], new Font("Segoe UI", 8.5f, isCurrent ? FontStyle.Bold : FontStyle.Regular),
+                        textRect, isCurrent ? p.Accent : p.Text,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+                    rowRects.Add(row);
+                    y += rowH;
+                }
+
+                using (var pen = new Pen(p.BorderStrong))
+                    g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+            }
+
+            protected override bool ShowWithoutActivation { get { return false; } }
+        }
+    }
+
+    // Horizontal row of custom-painted tabs, replacing a themed TabControl.
+    // Presentational only - it does not own or touch any page Panel visibility;
+    // the caller listens to TabSelected and swaps its own panels, exactly like
+    // ShowPage already does for Sidebar.Navigated.
+    public class TabStrip : Control
+    {
+        private class TabItem
+        {
+            public string Key;
+            public string Label;
+        }
+
+        private readonly List<TabItem> tabs = new List<TabItem>();
+        private readonly List<Rectangle> tabRects = new List<Rectangle>();
+        private int selected = -1;
+        private int hover = -1;
+
+        public event EventHandler<string> TabSelected;
+
+        public TabStrip()
+        {
+            Height = 40;
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        }
+
+        public void AddTab(string key, string label)
+        {
+            tabs.Add(new TabItem { Key = key, Label = label });
+            if (selected == -1) selected = 0;
+            Invalidate();
+        }
+
+        public void ClearTabs()
+        {
+            tabs.Clear();
+            selected = -1;
+            hover = -1;
+            Invalidate();
+        }
+
+        public string SelectedKey
+        {
+            get { return (selected >= 0 && selected < tabs.Count) ? tabs[selected].Key : null; }
+            set
+            {
+                for (int i = 0; i < tabs.Count; i++)
+                {
+                    if (tabs[i].Key == value)
+                    {
+                        if (selected != i) { selected = i; Invalidate(); }
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Selects the tab and raises TabSelected, mirroring Sidebar.Select - used
+        // when the caller wants the click side-effect (e.g. programmatic nav from
+        // elsewhere in the UI), as opposed to SelectedKey's silent set used to
+        // sync display state without re-triggering the page switch that state
+        // came from.
+        public void Select(string key)
+        {
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                if (tabs[i].Key == key)
+                {
+                    selected = i;
+                    Invalidate();
+                    if (TabSelected != null) TabSelected(this, key);
+                    return;
+                }
+            }
+        }
+
+        private int IndexAt(Point pt)
+        {
+            for (int i = 0; i < tabRects.Count; i++)
+                if (tabRects[i].Contains(pt)) return i;
+            return -1;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int i = IndexAt(e.Location);
+            if (i != hover) { hover = i; Invalidate(); }
+            Cursor = i >= 0 ? Cursors.Hand : Cursors.Default;
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (hover != -1) { hover = -1; Invalidate(); }
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) { base.OnMouseDown(e); return; }
+            int i = IndexAt(e.Location);
+            if (i >= 0 && i != selected)
+            {
+                selected = i;
+                Invalidate();
+                if (TabSelected != null) TabSelected(this, tabs[i].Key);
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var p = Theme.P;
+            var g = e.Graphics;
+            g.Clear(p.Bg);
+
+            tabRects.Clear();
+
+            int x = 0;
+            int h = Height - 1;   // leave room for the bottom divider line
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                var t = tabs[i];
+                int w = TextRenderer.MeasureText(t.Label, new Font("Segoe UI", 9.5f, FontStyle.Bold)).Width + 32;
+                var rect = new Rectangle(x, 0, w, h);
+                tabRects.Add(rect);
+
+                bool isSel = i == selected;
+                Color fg = isSel ? p.Text : p.TextDim;
+
+                if (!isSel && i == hover)
+                    Draw.RoundRect(g, new Rectangle(rect.X + 2, rect.Y + 4, rect.Width - 4, rect.Height - 8), 6,
+                        Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.08 : 0.05));
+
+                TextRenderer.DrawText(g, t.Label, new Font("Segoe UI", 9.5f, isSel ? FontStyle.Bold : FontStyle.Regular),
+                    rect, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+
+                // Same selected-state convention as Sidebar: an accent bar marking
+                // the active item - here along the bottom edge instead of the left,
+                // matching a horizontal tab strip's reading direction.
+                if (isSel)
+                    Draw.RoundRect(g, new Rectangle(rect.X + 10, h - 3, rect.Width - 20, 3), 1, p.Accent);
+
+                x += w;
+            }
+
+            using (var pen = new Pen(p.BorderStandard))
+                g.DrawLine(pen, 0, h, Width, h);
+        }
+    }
 }

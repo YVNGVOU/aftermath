@@ -51,6 +51,25 @@ namespace Aftermath
         private Sidebar nav;
         private ProgressBar bar;
         private Dictionary<string, FindingList> lists = new Dictionary<string, FindingList>();
+        // Cross-cutting Detections/Warnings pages: severity-split across every
+        // category except History/Drift, with a FilterBar (Source/Removable) over
+        // the top instead of one FindingList per category. allDetections/allWarnings
+        // hold the unfiltered set from the last Render() so FiltersChanged never
+        // needs a fresh scan to re-slice.
+        private Panel pgDetections, pgWarnings;
+        private FilterBar detectionsFilterBar, warningsFilterBar;
+        private FindingList detectionsList, warningsList;
+        private List<Finding> allDetections = new List<Finding>();
+        private List<Finding> allWarnings = new List<Finding>();
+        // System page: Startup/Persistence/Network/System consolidated under one
+        // TabStrip, sharing a single FindingList that gets re-populated on
+        // TabSelected rather than four separate lists. catFindings mirrors what
+        // each lists[c] was just given in Render(), keyed by category, so the tab
+        // switch has data to swap in without re-deriving it from TriageResult.
+        private Panel pgSystem;
+        private TabStrip systemTabs;
+        private FindingList systemList;
+        private Dictionary<string, List<Finding>> catFindings = new Dictionary<string, List<Finding>>();
         private FindingList cleanupList;
         private FindingList driftList;
         private QuarantineList quarantineList;
@@ -101,6 +120,10 @@ namespace Aftermath
             lblAboutBody, lblRetentionDaysCaption;
 
         private const string Overview = "Overview";
+        private const string Detections = "Detections";
+        private const string Warnings = "Warnings";
+        private const string Activity = "Activity";
+        private const string SystemPage = "System";
         private const string Cleanup = "Cleanup";
         private const string Quarantine = "Quarantine";
         private const string Drift = "Drift";
@@ -131,9 +154,11 @@ namespace Aftermath
         private static readonly Dictionary<string, string> Glyphs = new Dictionary<string, string>
         {
             { Overview,     "⌂" },
-            { "Detections", "⚠" },
+            { Detections,   "⚠" },
+            { Warnings,     "🔎" },
             { "Exposure",   "🔑" },
             { "History",    "🕘" },
+            { Activity,     "🕘" },
             { "Artifacts",  "📦" },
             { "Startup",    "⏻" },
             { "Persistence","⚙" },
@@ -150,14 +175,21 @@ namespace Aftermath
         private static readonly Dictionary<string, string> Help = new Dictionary<string, string>
         {
             { Overview,      "A summary of this machine, and what to do next." },
-            { "Detections",  "What your antivirus has already caught here. Recent and serious items first." },
+            // Detections/Warnings used to be per-category text ("what your antivirus
+            // has already caught"); both pages are now a severity split across every
+            // check, so the copy below covers the wider scope while reusing the same
+            // "already caught" / "worth a look" language OnExport's per-category
+            // section headers already relied on.
+            { Detections,    "Confirmed serious findings from every check on this machine - antivirus detections, exposure, artifacts, startup, persistence, network and system. Worst first." },
+            { Warnings,      "Findings worth a look but not yet serious, from every check on this machine. Usually old detections or leftover files, not active threats." },
             { "Exposure",    "What a password stealer could have reached, and what to change first. Nothing here is opened or read - only listed." },
             { "History",     "What actually ran on this PC and where it was downloaded from. These records outlive the files themselves." },
+            { Activity,      "What actually ran on this PC and where it was downloaded from. These records outlive the files themselves." },
             { "Artifacts",   "Leftovers from pirated software: disk images, crack and keygen files, installers modified after signing." },
             { "Startup",     "Everything that launches when you sign in, checked by digital signature rather than by name." },
             { "Persistence", "Hiding places malware uses to survive a reboot: services, scheduled tasks, WMI event subscriptions." },
             { "Network",     "What is talking to the internet right now, and which program owns each connection." },
-            { "System",      "Settings malware likes to change: proxy redirection, blocked updates, hidden antivirus exclusions." },
+            { "System",      "Startup, persistence, network, and settings malware likes to change - proxy redirection, blocked updates, hidden antivirus exclusions - in one tabbed page." },
             { Drift,         "What changed since your last scan: new startup entries, persistence, listening ports, and settings tracked by Baseline." },
             { Cleanup,       "Tick what you want gone, then quarantine it. Quarantined items are moved aside, not destroyed - you can restore them from the Quarantine page. Protected system locations are refused no matter what." },
             { Quarantine,    "Items you have quarantined. Restore one back to where it came from, or delete the quarantined copy permanently." },
@@ -440,32 +472,32 @@ namespace Aftermath
         {
             nav.Add(Overview, Overview, Glyphs[Overview]);
 
-            // Cats is ordered investigation-first, system-second (see its
-            // declaration above), so the grouping below is a straight split of
-            // the same array rather than a second list of page keys to keep in
-            // sync with it.
-            nav.AddSection("Investigation");
-            // Cats[0..2] (Detections/Exposure/History) are Free-tier; Cats[3]
-            // (Artifacts) is Plus+ per Entitlements.HasArtifactsPages - gated
-            // fully absent below Plus, never a fake disabled preview.
-            for (int i = 0; i < 3; i++) nav.Add(Cats[i], Cats[i], Glyphs[Cats[i]]);
+            // Detections/Warnings are the severity-split cross-cutting pages,
+            // Activity is History under its new name/key - all three Free-tier,
+            // same as the pages they replace.
+            nav.AddSection("Core");
+            nav.Add(Detections, Detections, Glyphs[Detections]);
+            nav.Add(Warnings, Warnings, Glyphs[Warnings]);
+            nav.Add(Activity, Activity, Glyphs[Activity]);
+
+            nav.AddSection("Protection");
+            // Cats[3] (Artifacts) and the System page (Startup/Persistence/Network/
+            // System, now one tabbed page) are Plus+ per HasArtifactsPages - gated
+            // fully absent below Plus, never a fake disabled preview, same as before.
             if (Entitlements.Current.HasArtifactsPages)
+            {
                 nav.Add(Cats[3], Cats[3], Glyphs[Cats[3]]);
+                nav.Add(SystemPage, SystemPage, Glyphs["System"]);
+            }
             nav.Add(Drift, Drift, Glyphs[Drift]);
             // Max+ only: timestamped findings only exist meaningfully once Plus's
-            // Artifacts/Startup/Persistence/Network/System pages are unlocked too,
-            // and HasCorrelationTimeline already implies HasArtifactsPages since
-            // Max sits above Plus in the tier ladder.
+            // Artifacts/System pages are unlocked too, and HasCorrelationTimeline
+            // already implies HasArtifactsPages since Max sits above Plus in the
+            // tier ladder.
             if (Entitlements.Current.HasCorrelationTimeline)
                 nav.Add(Timeline, Timeline, Glyphs[Timeline]);
 
-            if (Entitlements.Current.HasArtifactsPages)
-            {
-                nav.AddSection("System");
-                for (int i = 4; i < Cats.Length; i++) nav.Add(Cats[i], Cats[i], Glyphs[Cats[i]]);
-            }
-
-            nav.AddSection("Response");
+            nav.AddSection("Management");
             nav.Add(Cleanup, Cleanup, Glyphs[Cleanup]);
             nav.Add(Quarantine, Quarantine, Glyphs[Quarantine]);
             nav.Add(Sweep, Sweep, Glyphs[Sweep]);
@@ -554,6 +586,57 @@ namespace Aftermath
                 lists[c] = fl;
                 contentHost.Controls.Add(fl);
             }
+
+            // Detections/Warnings pages - FilterBar docked Top over one shared
+            // FindingList each. Fill added first, Top added after, same ordering
+            // rule as BuildSweep's resultsHost/inputs below.
+            detectionsList = new FindingList();
+            detectionsList.Dock = DockStyle.Fill;
+            detectionsList.EmptyText = "No confirmed threats. Nothing here means every check came back clean, not that this PC is uninfected.";
+            detectionsFilterBar = new FilterBar();
+            detectionsFilterBar.Dock = DockStyle.Top;
+            detectionsFilterBar.FiltersChanged += delegate { ApplyDetectionsFilter(); };
+            pgDetections = new Panel();
+            pgDetections.Dock = DockStyle.Fill;
+            pgDetections.Visible = false;
+            pgDetections.Controls.Add(detectionsList);
+            pgDetections.Controls.Add(detectionsFilterBar);
+            contentHost.Controls.Add(pgDetections);
+
+            warningsList = new FindingList();
+            warningsList.Dock = DockStyle.Fill;
+            warningsList.EmptyText = "Nothing worth a second look right now.";
+            warningsFilterBar = new FilterBar();
+            warningsFilterBar.Dock = DockStyle.Top;
+            warningsFilterBar.FiltersChanged += delegate { ApplyWarningsFilter(); };
+            pgWarnings = new Panel();
+            pgWarnings.Dock = DockStyle.Fill;
+            pgWarnings.Visible = false;
+            pgWarnings.Controls.Add(warningsList);
+            pgWarnings.Controls.Add(warningsFilterBar);
+            contentHost.Controls.Add(pgWarnings);
+
+            // System page - one TabStrip over one shared FindingList, swapped on
+            // TabSelected instead of four separate FindingLists per category.
+            systemList = new FindingList();
+            systemList.Dock = DockStyle.Fill;
+            systemList.EmptyText = "Nothing found here.";
+            systemTabs = new TabStrip();
+            systemTabs.Dock = DockStyle.Top;
+            systemTabs.AddTab(Cats[4], Cats[4]);   // Startup
+            systemTabs.AddTab(Cats[5], Cats[5]);   // Persistence
+            systemTabs.AddTab(Cats[6], Cats[6]);   // Network
+            systemTabs.AddTab(Cats[7], Cats[7]);   // System
+            systemTabs.TabSelected += delegate (object s, string key)
+            {
+                systemList.SetItems(catFindings.ContainsKey(key) ? catFindings[key] : new List<Finding>());
+            };
+            pgSystem = new Panel();
+            pgSystem.Dock = DockStyle.Fill;
+            pgSystem.Visible = false;
+            pgSystem.Controls.Add(systemList);
+            pgSystem.Controls.Add(systemTabs);
+            contentHost.Controls.Add(pgSystem);
 
             // cleanup page
             cleanupList = new FindingList();
@@ -782,9 +865,9 @@ namespace Aftermath
             // findings list - so it stays non-interactive rather than routing
             // somewhere arbitrary.
             tSerious.Clickable = true;
-            tSerious.Click += delegate { nav.Select("Detections"); };
+            tSerious.Click += delegate { nav.Select(Detections); };
             tCheck.Clickable = true;
-            tCheck.Click += delegate { nav.Select("Detections"); };
+            tCheck.Click += delegate { nav.Select(Warnings); };
             tRemovable.Clickable = true;
             tRemovable.Click += delegate { nav.Select(Cleanup); };
 
@@ -1587,7 +1670,19 @@ namespace Aftermath
             pgUpgrade.Visible = (key == Upgrade);
             if (key == Upgrade) pgUpgrade.RefreshTier();
             timelineList.Visible = (key == Timeline);
-            foreach (var kv in lists) kv.Value.Visible = (kv.Key == key);
+            pgDetections.Visible = (key == Detections);
+            pgWarnings.Visible = (key == Warnings);
+            pgSystem.Visible = (key == SystemPage);
+            // Artifacts is still its own single-category page; History's data now
+            // shows under the Activity key. Every other lists[c] entry (Detections/
+            // Exposure/Startup/Persistence/Network/System) still gets populated by
+            // Render() for exports and the System tab, but is never shown directly -
+            // the generic "key matches category name" loop this replaced would have
+            // wrongly matched "System" against lists["System"] and "Detections"
+            // against lists["Detections"], stacking the old single-category list
+            // underneath the new cross-cutting/tabbed page.
+            lists["Artifacts"].Visible = (key == Cats[3]);
+            lists["History"].Visible = (key == Activity);
 
             // Settings pages - same pattern, just a second set of keys. Keys never
             // collide across the two workspaces, so no extra "which workspace" gate
@@ -1719,6 +1814,18 @@ namespace Aftermath
             timelineList.BackColor = p.Bg;
             cleanupList.BackColor = p.Bg;
             quarantineList.BackColor = p.Bg;
+            pgDetections.BackColor = p.Bg;
+            pgWarnings.BackColor = p.Bg;
+            pgSystem.BackColor = p.Bg;
+            detectionsList.BackColor = p.Bg;
+            warningsList.BackColor = p.Bg;
+            systemList.BackColor = p.Bg;
+            detectionsFilterBar.BackColor = p.Bg;
+            warningsFilterBar.BackColor = p.Bg;
+            systemTabs.BackColor = p.Bg;
+            detectionsFilterBar.Invalidate();
+            warningsFilterBar.Invalidate();
+            systemTabs.Invalidate();
 
             foreach (var lbl in new Label[] { lblSweepHostsCaption, lblSweepUserCaption, lblSweepPassCaption,
                 lblSweepHostsListCaption, lblSweepFindingsCaption })
@@ -1845,6 +1952,7 @@ namespace Aftermath
             last = r;
             lastScan = DateTime.Now;
 
+            catFindings.Clear();
             foreach (var c in Cats)
             {
                 var ordered = r.ByCategory(c)
@@ -1852,11 +1960,55 @@ namespace Aftermath
                                .ThenByDescending(x => x.When)
                                .ToList();
                 lists[c].SetItems(ordered);
+                catFindings[c] = ordered;
 
                 int bad = ordered.Count(x => x.Severity == Sev.Bad);
                 int warn = ordered.Count(x => x.Severity == Sev.Warn);
                 nav.SetCount(c, bad + warn, bad > 0);
             }
+
+            // Detections/Warnings: same severity split, but cross-cutting across
+            // every category except History (not a "check", a record) and Drift
+            // (its own page with its own Sev mapping). TagSource stamps each
+            // finding's origin Category into Detail as a "Source" tag - FindingList
+            // has no separate column for it, so this is the least invasive way to
+            // keep that context visible once findings are pooled from 7 categories
+            // into one list.
+            var crossCutCats = new HashSet<string> { Cats[0], Cats[1], Cats[3], Cats[4], Cats[5], Cats[6], Cats[7] };
+            allDetections = r.Findings.Where(x => x.Severity == Sev.Bad && crossCutCats.Contains(x.Category))
+                                       .Select(TagSource).ToList();
+            allWarnings = r.Findings.Where(x => x.Severity == Sev.Warn && crossCutCats.Contains(x.Category))
+                                     .Select(TagSource).ToList();
+
+            var detSources = allDetections.Select(x => x.Category).Distinct().ToList();
+            detectionsFilterBar.SetFilterGroups(new List<FilterGroup> {
+                new FilterGroup { Label = "Source", Options = detSources },
+                new FilterGroup { Label = "Removable", Options = new List<string> { "Actionable", "Informational" } }
+            });
+            detectionsFilterBar.SetSortOptions(new List<string> { "Newest", "Oldest", "Source" });
+            ApplyDetectionsFilter();
+            nav.SetCount(Detections, allDetections.Count, true);
+
+            var warnSources = allWarnings.Select(x => x.Category).Distinct().ToList();
+            warningsFilterBar.SetFilterGroups(new List<FilterGroup> {
+                new FilterGroup { Label = "Source", Options = warnSources },
+                new FilterGroup { Label = "Removable", Options = new List<string> { "Actionable", "Informational" } }
+            });
+            warningsFilterBar.SetSortOptions(new List<string> { "Newest", "Oldest", "Source" });
+            ApplyWarningsFilter();
+            nav.SetCount(Warnings, allWarnings.Count, false);
+
+            // System page badge: aggregate across the 4 consolidated categories,
+            // then refresh whichever tab is currently showing with fresh data.
+            int sysBad = 0, sysWarn = 0;
+            foreach (var c in new[] { Cats[4], Cats[5], Cats[6], Cats[7] })
+            {
+                sysBad += catFindings[c].Count(x => x.Severity == Sev.Bad);
+                sysWarn += catFindings[c].Count(x => x.Severity == Sev.Warn);
+            }
+            nav.SetCount(SystemPage, sysBad + sysWarn, sysBad > 0);
+            string curTab = systemTabs.SelectedKey ?? Cats[4];
+            systemList.SetItems(catFindings.ContainsKey(curTab) ? catFindings[curTab] : new List<Finding>());
 
             // Timeline (Max+): every finding that carries a real timestamp - not
             // every category has one (Startup/Persistence entries usually don't),
@@ -1958,6 +2110,52 @@ namespace Aftermath
             lblLastScan.Text = "Last checked " + lastScan.ToString("dd MMM yyyy  HH:mm")
                 + (Elevation.IsAdmin() ? "   -   running as Administrator, all checks available."
                                        : "   -   not running as Administrator, so Defender exclusions could not be read.");
+        }
+
+        // Shallow clone carrying the origin category into Detail as a "Source" tag -
+        // Category itself is left untouched so filtering by Source still works.
+        private static Finding TagSource(Finding f)
+        {
+            var g = new Finding(f.Category, f.Title, "[" + f.Category + "]  " + (f.Detail ?? ""), f.Path, f.Severity, f.Removable);
+            g.When = f.When;
+            g.Count = f.Count;
+            g.Watchlist = f.Watchlist;
+            return g;
+        }
+
+        private void ApplyDetectionsFilter()
+        {
+            detectionsList.SetItems(FilterSort(allDetections, detectionsFilterBar));
+        }
+
+        private void ApplyWarningsFilter()
+        {
+            warningsList.SetItems(FilterSort(allWarnings, warningsFilterBar));
+        }
+
+        // Shared by Detections and Warnings - both are the same cross-cutting
+        // severity split with a FilterBar over Source/Removable and the same three
+        // sort orders, so the filter/sort logic itself only needs to exist once.
+        private List<Finding> FilterSort(List<Finding> source, FilterBar bar)
+        {
+            var active = bar.ActiveFilters;
+            IEnumerable<Finding> q = source;
+
+            var wantedSources = new HashSet<string>(
+                active.Where(k => k.StartsWith("Source:")).Select(k => k.Substring("Source:".Length)));
+            if (wantedSources.Count > 0)
+                q = q.Where(f => wantedSources.Contains(f.Category));
+
+            bool wantActionable = active.Contains("Removable:Actionable");
+            bool wantInformational = active.Contains("Removable:Informational");
+            if (wantActionable || wantInformational)
+                q = q.Where(f => (wantActionable && f.Removable) || (wantInformational && !f.Removable));
+
+            if (bar.ActiveSort == "Oldest") q = q.OrderBy(f => f.When);
+            else if (bar.ActiveSort == "Source") q = q.OrderBy(f => f.Category).ThenByDescending(f => f.When);
+            else q = q.OrderByDescending(f => f.When);   // "Newest", and the default
+
+            return q.ToList();
         }
 
         private int CountRemovable()
