@@ -47,6 +47,10 @@ namespace Aftermath
         private readonly Label lblInfoOnly = new Label();
         private readonly Panel divider3 = new Panel();
 
+        private readonly Label lblFixHeader = new Label();
+        private readonly Label lblFixSteps = new Label();
+        private readonly Panel divider2b = new Panel();
+
         private readonly Label lblRelatedHeader = new Label();
         private readonly FindingList relatedList = new FindingList();
         private readonly Panel divider4 = new Panel();
@@ -127,6 +131,21 @@ namespace Aftermath
             divider3.Height = 1;
             Controls.Add(divider3);
 
+            lblFixHeader.Text = "HOW TO FIX THIS";
+            lblFixHeader.Font = Brand.F(8f, FontStyle.Bold);
+            lblFixHeader.AutoSize = true;
+            Controls.Add(lblFixHeader);
+
+            // Height is recomputed per-finding in Show()/LayoutContent since the
+            // number of steps varies - same reason lblDetail already gets a fixed
+            // Height guess rather than AutoSize, but this one is re-measured live
+            // because step counts vary far more than a single Detail paragraph does.
+            lblFixSteps.AutoSize = false;
+            Controls.Add(lblFixSteps);
+
+            divider2b.Height = 1;
+            Controls.Add(divider2b);
+
             lblRelatedHeader.Font = Brand.F(8f, FontStyle.Bold);
             lblRelatedHeader.AutoSize = true;
             Controls.Add(lblRelatedHeader);
@@ -191,6 +210,15 @@ namespace Aftermath
 
             btnQuarantine.Visible = f.Removable;
             lblInfoOnly.Visible = !f.Removable;
+
+            var fixSteps = RemediationGuide.StepsFor(f);
+            var fixText = new System.Text.StringBuilder();
+            for (int i = 0; i < fixSteps.Count; i++)
+            {
+                if (i > 0) fixText.Append("\n\n");
+                fixText.Append((i + 1) + ". " + fixSteps[i]);
+            }
+            lblFixSteps.Text = fixText.ToString();
 
             var all = (ctx != null) ? ctx.Findings : new List<Finding>();
 
@@ -266,6 +294,24 @@ namespace Aftermath
             divider3.Width = w;
             y += 18;
 
+            lblFixHeader.Location = new Point(22, y);
+            y += 22;
+
+            lblFixSteps.Location = new Point(22, y);
+            lblFixSteps.Width = w;
+            // Measured, not AutoSize, because the step count/length varies per
+            // finding and we need an exact height to keep everything below it
+            // from overlapping - same reasoning as the fixed-then-measured
+            // approach the rest of this manual layout already uses.
+            Size fixSize = TextRenderer.MeasureText(lblFixSteps.Text, lblFixSteps.Font, new Size(w, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.Left);
+            lblFixSteps.Height = fixSize.Height + 4;
+            y += lblFixSteps.Height + 12;
+
+            divider2b.Location = new Point(22, y);
+            divider2b.Width = w;
+            y += 18;
+
             lblRelatedHeader.Location = new Point(22, y);
             y += 22;
             relatedList.Location = new Point(22, y);
@@ -297,10 +343,12 @@ namespace Aftermath
             lblPath.ForeColor = p.TextDim;
             lblActionHeader.ForeColor = p.TextDim;
             lblInfoOnly.ForeColor = p.TextDim;
+            lblFixHeader.ForeColor = p.TextDim;
+            lblFixSteps.ForeColor = p.Text;
             lblRelatedHeader.ForeColor = p.TextDim;
             lblTimelineHeader.ForeColor = p.TextDim;
 
-            foreach (var d in new Panel[] { divider1, divider2, divider3, divider4 })
+            foreach (var d in new Panel[] { divider1, divider2, divider2b, divider3, divider4 })
                 d.BackColor = p.BorderStandard;
 
             Color soft = Draw.Mix(p.Bg, p.Text, Theme.IsDark ? 0.16 : 0.10);
