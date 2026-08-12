@@ -26,7 +26,9 @@ namespace Aftermath
         // revenue/growth to justify buying a custom domain (svaftermath.net
         // is the planned name, not purchased yet - see DEPLOY.md step 7).
         // Swap this one constant once that domain is live.
-        public const string BaseUrl = "https://sinvaux-website.fly.dev";
+        // Aftermath is served under /aftermath/* on the merged SINVAUX site
+        // (formerly its own sinvaux-website deployment) - see the api path below.
+        public const string BaseUrl = "https://sinvaux-main.fly.dev";
 
         public static AccountLoginResult Login(string email, string password)
         {
@@ -44,7 +46,7 @@ namespace Aftermath
                 string body = "{\"email\":\"" + JsonEsc(email) + "\",\"password\":\"" + JsonEsc(password) + "\"}";
                 byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
 
-                var req = (HttpWebRequest)WebRequest.Create(baseUrl.TrimEnd('/') + "/api/login");
+                var req = (HttpWebRequest)WebRequest.Create(baseUrl.TrimEnd('/') + "/aftermath/api/login");
                 req.Method = "POST";
                 req.ContentType = "application/json";
                 req.ContentLength = bodyBytes.Length;

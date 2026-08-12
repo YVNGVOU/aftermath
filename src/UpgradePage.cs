@@ -187,7 +187,7 @@ namespace Aftermath
                 else
                 {
                     string machineId = AnonymizedMachineId();
-                    string url = "https://sinvaux-website.fly.dev/buy?tier=" + tier.ToString().ToLowerInvariant() +
+                    string url = "https://sinvaux-main.fly.dev/aftermath/buy?tier=" + tier.ToString().ToLowerInvariant() +
                         "&machine=" + machineId;
                     Process.Start(url);
                 }
