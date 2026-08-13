@@ -1138,8 +1138,8 @@ namespace Aftermath
             // slim strip instead of a headline-sized callout.
             proCard = new InfoCard();
             proCard.Compact = true;
-            proCard.Title = "Free reads Windows Defender. Pro reads everything installed.";
-            proCard.Body = "Pro cross-references every antivirus and browser protection on this PC into one timeline, adds a full-disk forensic sweep, and watches for what changes between visits - across every machine you look after.";
+            proCard.Title = "Free reads Windows Defender. Plus reads everything installed.";
+            proCard.Body = "Plus cross-references every other antivirus product on this PC, not just Defender, and adds a dedicated Network Center for live connections and blocked-traffic history. Pro and Max add scheduled monitoring, a correlation timeline, and multi-host Sweep on top of that.";
             proCard.Location = new Point(22, 330);
             proCard.Height = 44;
             proCard.Width = 700;
@@ -2277,7 +2277,14 @@ namespace Aftermath
                 try
                 {
                     Scanner.Defender(r, SetStatus); ScanStep();
-                    ExternalAv.ThirdPartyAv(r, SetStatus); ScanStep();
+                    // Plus+ per HasArtifactsPages, same gate as the Artifacts/
+                    // System/Network pages - fulfills the "Free reads Windows
+                    // Defender, Plus reads everything installed" line on
+                    // Overview, which this scan step is literally what makes
+                    // true. ScanStep() still runs either way so the progress
+                    // bar's step count stays correct regardless of tier.
+                    if (Entitlements.Current.HasArtifactsPages) ExternalAv.ThirdPartyAv(r, SetStatus);
+                    ScanStep();
                     Scanner.SystemChecks(r, SetStatus); ScanStep();
                     Deep.Sabotage(r, SetStatus); ScanStep();
                     Scanner.Startup(r, SetStatus); ScanStep();
